@@ -227,10 +227,24 @@ def encargos() -> list[dict]:
 
 
 def eliminar_encargo(encargo_id: str) -> None:
-    """Borra el encargo. Materialidad, encargo_insumo y hallazgos caen en
-    cascada (son del encargo); cargas, cotejos y alertas se quedan --
-    son del cliente, solo pierden el vínculo (encargo_id -> NULL)."""
+    """Borra el encargo y, de sus cargas, las que no siga usando ningún
+    OTRO encargo -- para dejarlas de verdad limpias y que un reintento
+    con el mismo archivo no las confunda con "sin cambios" contra una
+    carga huérfana ya promovida. Las que sí comparte otro encargo (ej.
+    movimientos reutilizados como MOV_ANTERIOR de un año distinto) se
+    quedan, junto con su balance y staging -- ese caso sigue vivo."""
+    huerfanas = varios(
+        """SELECT DISTINCT ei.carga_id FROM core.encargo_insumo ei
+           WHERE ei.encargo_id=%s
+             AND NOT EXISTS (
+               SELECT 1 FROM core.encargo_insumo otro
+               WHERE otro.carga_id = ei.carga_id AND otro.encargo_id <> %s
+             )""",
+        (encargo_id, encargo_id),
+    )
     ejecutar("DELETE FROM core.encargo WHERE id=%s", (encargo_id,))
+    for f in huerfanas:
+        ejecutar("DELETE FROM core.carga WHERE id=%s", (f["carga_id"],))
 
 
 def checklist(encargo_id: str) -> list[dict]:

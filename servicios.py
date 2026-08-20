@@ -157,6 +157,11 @@ def cotejar(carga_id: str) -> dict:
             mensaje=msg,
         )
         db.actualizar_carga(carga_id, estado="REEMPLAZADA")
+        if c["encargo_id"]:
+            # subir() ya había apuntado el checklist a esta carga nueva;
+            # como no se promueve nada, se devuelve al que sí tiene el
+            # balance -- si no, la pestaña Balance queda vacía.
+            db.asignar_insumo(c["encargo_id"], c["tipo"], prev["id"])
         return {"resultado": "ARCHIVO_IDENTICO", "mensaje": msg,
                 "cotejo_id": cot["id"]}
 
@@ -174,6 +179,8 @@ def cotejar(carga_id: str) -> dict:
             filas_previas=len(hp), filas_nuevas=len(hn), mensaje=msg,
         )
         db.actualizar_carga(carga_id, estado="REEMPLAZADA")
+        if c["encargo_id"]:
+            db.asignar_insumo(c["encargo_id"], c["tipo"], prev["id"])
         return {"resultado": "SIN_FILAS_NUEVAS", "mensaje": msg,
                 "cotejo_id": cot["id"]}
 
