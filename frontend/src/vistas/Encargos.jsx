@@ -10,7 +10,27 @@ export default function Encargos({ onAbrir }) {
     nit: "", razon_social: "", fecha_corte: "", responsable: "",
   });
 
-  useEffect(() => { api.encargos().then(setLista).catch((e) => setError(e.message)); }, []);
+  useEffect(() => { refrescar(); }, []);
+
+  function refrescar() {
+    api.encargos().then(setLista).catch((e) => setError(e.message));
+  }
+
+  async function eliminar(e, enc) {
+    e.stopPropagation();
+    const seguro = window.confirm(
+      `¿Borrar el encargo de ${enc.razon_social} (${fecha(enc.fecha_corte)})? ` +
+      `Las cargas ya subidas no se pierden, pero hay que volver a asignarlas ` +
+      `y las materialidades digitadas se pierden.`
+    );
+    if (!seguro) return;
+    try {
+      await api.eliminarEncargo(enc.id);
+      refrescar();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
 
   async function crear(e) {
     e.preventDefault();
@@ -62,16 +82,27 @@ export default function Encargos({ onAbrir }) {
           ) : (
             <div className="border-t border-regla">
               {lista.map((e) => (
-                <button
+                <div
                   key={e.id}
-                  onClick={() => onAbrir(e.id)}
-                  className="flex w-full items-baseline gap-6 border-b border-regla-fina py-4 text-left hover:bg-papel-hondo"
+                  className="flex w-full items-baseline gap-6 border-b border-regla-fina py-4 hover:bg-papel-hondo"
                 >
-                  <span className="flex-1 font-medium">{e.razon_social}</span>
-                  <span className="cifra text-xs text-tinta-suave">{e.nit}</span>
-                  <span className="cifra text-sm">{fecha(e.fecha_corte)}</span>
-                  <span className="rotulo w-24 text-right">{e.estado}</span>
-                </button>
+                  <button
+                    onClick={() => onAbrir(e.id)}
+                    className="flex flex-1 items-baseline gap-6 text-left"
+                  >
+                    <span className="flex-1 font-medium">{e.razon_social}</span>
+                    <span className="cifra text-xs text-tinta-suave">{e.nit}</span>
+                    <span className="cifra text-sm">{fecha(e.fecha_corte)}</span>
+                    <span className="rotulo w-24 text-right">{e.estado}</span>
+                  </button>
+                  <button
+                    onClick={(ev) => eliminar(ev, e)}
+                    className="rotulo text-tinta-suave hover:text-rojo"
+                    title="Borrar este encargo"
+                  >
+                    Borrar
+                  </button>
+                </div>
               ))}
             </div>
           )}

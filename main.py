@@ -99,6 +99,18 @@ def ver_encargo(encargo_id: str) -> dict:
     return {**enc, "materialidades": db.materialidades(encargo_id)}
 
 
+@app.delete("/encargos/{encargo_id}")
+def eliminar_encargo(encargo_id: str) -> dict:
+    """Borra el encargo. Las cargas ya subidas (y su balance promovido)
+    no se tocan -- son del cliente, no del encargo -- así que la próxima
+    vez que se abra un encargo nuevo para el mismo NIT, sigue pudiendo
+    reutilizarlas si aplica."""
+    if not db.encargo(encargo_id):
+        raise HTTPException(404, "Encargo no existe")
+    db.eliminar_encargo(encargo_id)
+    return {"eliminado": True}
+
+
 @app.get("/encargos/{encargo_id}/checklist")
 def checklist(encargo_id: str) -> list[dict]:
     return db.checklist(encargo_id)

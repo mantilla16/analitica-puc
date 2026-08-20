@@ -24,6 +24,7 @@ export const api = {
   encargos: () => pedir("/encargos"),
   encargo: (id) => pedir(`/encargos/${id}`),
   crearEncargo: (d) => pedir("/encargos", json("POST", d)),
+  eliminarEncargo: (id) => pedir(`/encargos/${id}`, { method: "DELETE" }),
   checklist: (id) => pedir(`/encargos/${id}/checklist`),
 
   subir: (encargoId, form) =>

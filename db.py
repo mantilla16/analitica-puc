@@ -226,6 +226,13 @@ def encargos() -> list[dict]:
     )
 
 
+def eliminar_encargo(encargo_id: str) -> None:
+    """Borra el encargo. Materialidad, encargo_insumo y hallazgos caen en
+    cascada (son del encargo); cargas, cotejos y alertas se quedan --
+    son del cliente, solo pierden el vínculo (encargo_id -> NULL)."""
+    ejecutar("DELETE FROM core.encargo WHERE id=%s", (encargo_id,))
+
+
 def checklist(encargo_id: str) -> list[dict]:
     """Una fila por insumo esperado, con la carga asignada si existe."""
     return varios(
