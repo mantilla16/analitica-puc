@@ -227,18 +227,20 @@ def encargos() -> list[dict]:
 
 
 def eliminar_encargo(encargo_id: str) -> None:
-    """Borra el encargo y, de sus cargas, las que no siga usando ningún
-    OTRO encargo -- para dejarlas de verdad limpias y que un reintento
-    con el mismo archivo no las confunda con "sin cambios" contra una
-    carga huérfana ya promovida. Las que sí comparte otro encargo (ej.
-    movimientos reutilizados como MOV_ANTERIOR de un año distinto) se
-    quedan, junto con su balance y staging -- ese caso sigue vivo."""
+    """Borra el encargo y TODAS las cargas creadas bajo él -- no solo la
+    que quedó asignada al final en el checklist, también las intermedias
+    que una recarga fue dejando huérfanas por el camino -- salvo que
+    algún OTRO encargo las esté usando todavía (ej. movimientos
+    reutilizados como MOV_ANTERIOR de un año distinto; ese caso sigue
+    vivo). Si no se barren también las intermedias, carga_previa() puede
+    terminar comparando contra una de esas huérfanas vacías en vez del
+    original."""
     huerfanas = varios(
-        """SELECT DISTINCT ei.carga_id FROM core.encargo_insumo ei
-           WHERE ei.encargo_id=%s
+        """SELECT c.id FROM core.carga c
+           WHERE c.encargo_id=%s
              AND NOT EXISTS (
-               SELECT 1 FROM core.encargo_insumo otro
-               WHERE otro.carga_id = ei.carga_id AND otro.encargo_id <> %s
+               SELECT 1 FROM core.encargo_insumo ei
+               WHERE ei.carga_id = c.id AND ei.encargo_id <> %s
              )""",
         (encargo_id, encargo_id),
     )
@@ -323,12 +325,17 @@ def carga_por_hash(cliente_id: str, hash_: str) -> dict | None:
 
 def carga_previa(cliente_id: str, tipo: str, ini: date | None,
                  fin: date | None, excluir: str) -> dict | None:
-    """Última carga del mismo cliente, tipo y periodo. Base del cotejo."""
+    """Última carga VÁLIDA del mismo cliente, tipo y periodo -- base del
+    cotejo. Excluye REEMPLAZADA/RECHAZADA: son recargas sin cambios o que
+    fallaron al procesar, no representan el dato bueno. Sin este filtro,
+    una cadena de recargas idénticas termina comparando contra la última
+    de esas en vez de contra la que sí tiene el balance."""
     return uno(
         """SELECT * FROM core.carga
            WHERE cliente_id=%s AND tipo=%s AND id <> %s
              AND periodo_ini IS NOT DISTINCT FROM %s
              AND periodo_fin IS NOT DISTINCT FROM %s
+             AND estado NOT IN ('REEMPLAZADA', 'RECHAZADA')
            ORDER BY fecha_carga DESC LIMIT 1""",
         (cliente_id, tipo, excluir, ini, fin),
     )
