@@ -103,6 +103,77 @@ Si Ollama no está corriendo, la pestaña Variaciones sigue funcionando
 normal — cada observación simplemente muestra un aviso de que no se pudo
 generar, en vez de romper el resto de la página.
 
+## Despliegue en un servidor Linux (producción)
+
+Pensado para un servidor Ubuntu/Debian sin GPU: Postgres, backend y
+Ollama (CPU) en la misma máquina, nginx al frente sirviendo el frontend
+y haciendo de proxy hacia el backend.
+
+```bash
+# Paquetes del sistema
+sudo apt update
+sudo apt install -y python3 python3-venv python3-pip git nginx nodejs npm postgresql
+
+# Base de datos
+sudo -u postgres createdb auditoria_puc
+sudo -u postgres psql -d auditoria_puc -v ON_ERROR_STOP=1 -f db/schema.sql
+
+# Backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# Frontend -- genera frontend/dist
+cd frontend && npm install && npm run build && cd ..
+sudo mkdir -p /var/www/analitica-puc
+sudo cp -r frontend/dist/* /var/www/analitica-puc/
+
+# nginx
+sudo cp deploy/analitica-puc.nginx /etc/nginx/sites-available/analitica-puc
+sudo ln -s /etc/nginx/sites-available/analitica-puc /etc/nginx/sites-enabled/
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo nginx -t && sudo systemctl reload nginx
+
+# Ollama (si corre en este mismo servidor)
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull qwen3:8b
+```
+
+El backend se deja corriendo con `systemd` (no directamente con
+`uvicorn --reload`, eso es solo para desarrollo):
+
+```ini
+# /etc/systemd/system/analitica-puc.service
+[Unit]
+Description=Analitica PUC - FastAPI
+After=network.target postgresql.service
+
+[Service]
+User=TU_USUARIO
+WorkingDirectory=/home/TU_USUARIO/analitica-puc
+Environment="AUDITORIA_DSN=postgresql://postgres:TU_PASSWORD@localhost:5432/auditoria_puc"
+ExecStart=/home/TU_USUARIO/analitica-puc/.venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl enable --now analitica-puc
+journalctl -u analitica-puc -f   # logs en vivo
+```
+
+El navegador solo habla con nginx (puerto 80) -- ni el frontend ni nadie
+de afuera necesita saber que el backend está en el puerto 8000. Por eso
+mismo, la lista `allow_origins` de CORS en `main.py` (pensada para
+`localhost:5173`/`3000` en desarrollo) deja de importar en este montaje:
+todo llega al navegador bajo el mismo origen.
+
+**Pendiente, no incluido aquí:** HTTPS. Sin un dominio apuntando a este
+servidor no tiene sentido armarlo todavía -- cuando lo haya, es un
+`certbot --nginx` y listo.
+
 ## Qué NO va en este repo
 
 - `archivos/` -- los Excel que suben los clientes quedan ahí en disco, pero

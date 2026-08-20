@@ -1,0 +1,51 @@
+# Config de nginx para analitica-puc.
+#
+# Replica en producción lo que hace el proxy de Vite en desarrollo
+# (frontend/vite.config.js): el navegador siempre llama a /api/..., nginx
+# le quita el prefijo /api y lo manda al backend de FastAPI.
+#
+# Instalación:
+#   sudo cp deploy/analitica-puc.nginx /etc/nginx/sites-available/analitica-puc
+#   sudo ln -s /etc/nginx/sites-available/analitica-puc /etc/nginx/sites-enabled/
+#   sudo rm -f /etc/nginx/sites-enabled/default
+#   sudo nginx -t && sudo systemctl reload nginx
+#
+# Antes de activarlo, cambia `root` a donde quede el build del frontend
+# (frontend/dist tras `npm run build`) y `server_name` a tu dominio o IP.
+
+server {
+    listen 80;
+    server_name _;
+
+    # Los balances y movimientos que suben los clientes pesan varios MB
+    # (el de movimientos reales de LIQUITECH pesa 14MB) -- el default de
+    # nginx (1MB) rechazaría esas cargas con un 413 antes de que lleguen
+    # siquiera a FastAPI.
+    client_max_body_size 50M;
+
+    root /var/www/analitica-puc;
+    index index.html;
+
+    # API -- FastAPI corriendo en localhost:8000 vía uvicorn/systemd.
+    # El slash final en ambos lados es lo que hace que nginx quite el
+    # /api/ antes de reenviar (/api/encargos -> localhost:8000/encargos).
+    location /api/ {
+        proxy_pass http://127.0.0.1:8000/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # /variaciones/{fase}/observaciones llama a Ollama una vez por
+        # cuenta significativa, en secuencia. En este servidor sin GPU
+        # eso puede tardar varios minutos si hay muchas cuentas marcadas
+        # -- con el timeout default (60s) nginx cortaría la respuesta a
+        # medio camino.
+        proxy_read_timeout 300s;
+    }
+
+    # Frontend -- build estático de Vite.
+    location / {
+        try_files $uri /index.html;
+    }
+}
