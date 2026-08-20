@@ -1,0 +1,77 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------
+   Paleta tomada del oficio: el punteo del auditor.
+   Lápiz verde = verificado. Lápiz rojo = excepción. Ámbar = revisar.
+   Papel frío, no crema: esto es un papel de trabajo, no un folleto.
+   --------------------------------------------------------------- */
+@theme {
+  --color-papel:       #f6f7f4;
+  --color-papel-hondo: #eceee8;
+  --color-papel-alto:  #ffffff;
+
+  --color-tinta:       #1b2a2f;
+  --color-tinta-media: #4a5c62;
+  --color-tinta-suave: #7d8c90;
+
+  --color-regla:       #d6dbd4;
+  --color-regla-fina:  #e6e9e3;
+
+  --color-verde:       #2e6b4f;
+  --color-verde-tenue: #e4efe7;
+  --color-rojo:        #a33b30;
+  --color-rojo-tenue:  #f6e6e4;
+  --color-ambar:       #97690f;
+  --color-ambar-tenue: #f7eeda;
+
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+}
+
+html {
+  background: var(--color-papel);
+  color: var(--color-tinta);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+body { margin: 0; }
+
+/* Cifras tabulares: sin esto las columnas de saldos no se alinean */
+.cifra {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* Etiqueta de sección: versalita monoespaciada, no un h2 más */
+.rotulo {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-tinta-suave);
+}
+
+/* Punteo: el gesto del lápiz sobre la cifra verificada */
+@keyframes puntear {
+  from { stroke-dashoffset: 24; }
+  to   { stroke-dashoffset: 0; }
+}
+.punteo path {
+  stroke-dasharray: 24;
+  animation: puntear 0.4s ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .punteo path { animation: none; stroke-dashoffset: 0; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+*:focus-visible {
+  outline: 2px solid var(--color-verde);
+  outline-offset: 2px;
+}

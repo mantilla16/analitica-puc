@@ -1,0 +1,20 @@
+# Entornos y dependencias -- se regeneran, no van en git
+.venv/
+__pycache__/
+*.pyc
+frontend/node_modules/
+frontend/dist/
+
+# Datos de clientes de auditoría -- NUNCA va al repo
+archivos/
+
+# Respaldos manuales locales -- git es el respaldo real ahora
+BK/
+filesV3/
+filesV3.zip
+frontend/files.zip
+
+# Credenciales / configuración local
+.env
+.env.*
+!.env.example
