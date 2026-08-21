@@ -5,6 +5,7 @@ Igual que el resto: la base solo tiene tablas, aquí se arma todo.
 """
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 
 import db
@@ -407,6 +408,28 @@ def observacion_cuenta(encargo_id: str, fase: str, codigo: str) -> dict | None:
         return None
     entrada = _entrada_para(d, encargo_id, fila)
     return {"cuenta": codigo, **ia.redactar_observacion(entrada)}
+
+
+def observaciones_lote(encargo_id: str, fase: str, codigos: list[str]) -> list[dict]:
+    """Varias observaciones a la vez, EN PARALELO -- pensado para pedirse
+    en lotes chicos desde el frontend (ej. de 5 en 5), así el tiempo de
+    la petición es el de la cuenta más lenta del lote, no la suma de
+    todas. Generarlas todas de una en secuencia fue justo lo que causó
+    el 504 con un proveedor en la nube."""
+    d = variaciones(encargo_id, fase)
+    if not d["listo"] or not d["aplica"]:
+        return []
+    por_codigo = {f["cuenta"]: f for f in d["filas"]}
+    seleccion = [por_codigo[c] for c in codigos if c in por_codigo]
+    if not seleccion:
+        return []
+
+    def _una(fila: dict) -> dict:
+        entrada = _entrada_para(d, encargo_id, fila)
+        return {"cuenta": fila["cuenta"], **ia.redactar_observacion(entrada)}
+
+    with ThreadPoolExecutor(max_workers=len(seleccion)) as ex:
+        return list(ex.map(_una, seleccion))
 
 
 def observaciones(encargo_id: str, fase: str | None = None) -> list[dict]:

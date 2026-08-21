@@ -319,6 +319,15 @@ def observaciones_ia(encargo_id: str, fase: str) -> list[dict]:
     return A.observaciones(encargo_id, fase)
 
 
+@app.get("/encargos/{encargo_id}/variaciones/{fase}/observaciones/lote")
+def observaciones_lote(encargo_id: str, fase: str, codigos: str) -> list[dict]:
+    """Varias observaciones a la vez, en paralelo -- para pedirse en
+    lotes chicos (ej. 5) desde el frontend en vez de una por una o
+    todas juntas en secuencia. `codigos` es una lista separada por comas."""
+    lista = [c for c in codigos.split(",") if c]
+    return A.observaciones_lote(encargo_id, fase, lista)
+
+
 @app.get("/encargos/{encargo_id}/variaciones/{fase}/observacion/{codigo}")
 def observacion_cuenta(encargo_id: str, fase: str, codigo: str) -> dict:
     """Una sola observación de IA, a pedido -- una llamada al modelo por

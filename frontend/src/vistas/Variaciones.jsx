@@ -57,7 +57,43 @@ export default function Variaciones({ encargoId }) {
       .catch((e) => setError(e.message));
   }, [encargoId, fase]);
 
-  useEffect(() => { setObs({}); }, [encargoId, d?.fase]);
+  const [progreso, setProgreso] = useState(null);   // {hecho, total} mientras corren los lotes
+
+  useEffect(() => { setObs({}); setProgreso(null); }, [encargoId, d?.fase]);
+
+  useEffect(() => {
+    if (!d?.listo || !d.aplica) return;
+    const codigos = d.filas.filter((f) => f.significativa).map((f) => f.cuenta);
+    if (!codigos.length) return;
+
+    let vivo = true;
+    const TAMANO_LOTE = 5;
+
+    (async () => {
+      for (let i = 0; i < codigos.length; i += TAMANO_LOTE) {
+        if (!vivo) return;
+        const lote = codigos.slice(i, i + TAMANO_LOTE);
+        setProgreso({ hecho: i, total: codigos.length });
+        setGenerando((g) => ({ ...g, ...Object.fromEntries(lote.map((c) => [c, true])) }));
+        try {
+          const r = await api.observacionesLote(encargoId, d.fase, lote);
+          if (!vivo) return;
+          setObs((o) => ({ ...o, ...Object.fromEntries(r.map((x) => [x.cuenta, x])) }));
+        } catch (err) {
+          if (!vivo) return;
+          setObs((o) => ({
+            ...o,
+            ...Object.fromEntries(lote.map((c) => [c, { texto: err.message, verificado: false }])),
+          }));
+        } finally {
+          setGenerando((g) => ({ ...g, ...Object.fromEntries(lote.map((c) => [c, false])) }));
+        }
+      }
+      if (vivo) setProgreso(null);
+    })();
+
+    return () => { vivo = false; };
+  }, [encargoId, d?.fase, d?.listo, d?.aplica]);
 
   async function explicar(codigo) {
     setGenerando((g) => ({ ...g, [codigo]: true }));
@@ -203,6 +239,13 @@ export default function Variaciones({ encargoId }) {
             ))}
           </div>
         </div>
+      )}
+
+      {progreso && (
+        <p className="text-xs text-tinta-suave">
+          Generando observaciones con IA en lotes de 5 — {entero(progreso.hecho)} de{" "}
+          {entero(progreso.total)}…
+        </p>
       )}
 
       {/* -------------------------------------------------- nota de alcance */}

@@ -52,6 +52,8 @@ export const api = {
   observaciones: (id, fase) => pedir(`/encargos/${id}/variaciones/${fase}/observaciones`),
   observacionCuenta: (id, fase, codigo) =>
     pedir(`/encargos/${id}/variaciones/${fase}/observacion/${codigo}`),
+  observacionesLote: (id, fase, codigos) =>
+    pedir(`/encargos/${id}/variaciones/${fase}/observaciones/lote?codigos=${codigos.join(",")}`),
   detalleCuenta: (id, codigo) => pedir(`/encargos/${id}/cuentas/${codigo}`),
 };
 
