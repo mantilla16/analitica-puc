@@ -6,8 +6,11 @@ analisis.py (variación, motivo, patrones de movimiento) y solo redacta.
 Toda cifra que aparezca en el texto debe existir literal en la entrada —
 se verifica después de generar, no se confía en el modelo.
 
-Corre contra un modelo abierto servido localmente por Ollama. No toca la
-base ni sabe qué es un encargo: recibe un dict, devuelve un dict.
+Dos proveedores posibles, elegidos por IA_PROVEEDOR:
+  - "ollama" (default) -- modelo abierto corriendo local, para desarrollo.
+  - "azure_foundry" -- despliegue serverless en Azure AI Foundry, para un
+    servidor sin suficiente CPU/GPU propia.
+No toca la base ni sabe qué es un encargo: recibe un dict, devuelve un dict.
 """
 from __future__ import annotations
 
@@ -18,8 +21,14 @@ import urllib.request
 from decimal import Decimal
 from typing import Any
 
+IA_PROVEEDOR = os.getenv("IA_PROVEEDOR", "ollama")
+
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 MODELO = os.getenv("OLLAMA_MODELO", "qwen3:8b")
+
+AZURE_AI_ENDPOINT = os.getenv("AZURE_AI_ENDPOINT")
+AZURE_AI_DEPLOYMENT = os.getenv("AZURE_AI_DEPLOYMENT")
+AZURE_AI_API_KEY = os.getenv("AZURE_AI_API_KEY")
 
 PROMPT_SISTEMA = (
     "Eres un asistente de auditoría. Se te dan cifras YA CALCULADAS sobre "
@@ -55,18 +64,23 @@ def _prompt(entrada: dict) -> str:
     return (
         f"{PROMPT_SISTEMA}\n\n"
         f"JSON de entrada:\n{json.dumps(entrada, ensure_ascii=False, default=str)}\n\n"
-        f"Observación: /no_think"
+        f"Observación:"
     )
 
 
 def redactar_observacion(entrada: dict, timeout: int = 60) -> dict:
-    """Llama al modelo local y verifica las cifras del texto contra la entrada.
+    """Llama al modelo (Ollama o Azure AI Foundry, según IA_PROVEEDOR) y
+    verifica las cifras del texto contra la entrada.
 
-    Nunca lanza por errores del modelo/red: si Ollama no responde, devuelve
-    un texto de aviso en vez de tumbar el flujo de variaciones.
+    Nunca lanza por errores del modelo/red: si no responde, devuelve un
+    texto de aviso en vez de tumbar el flujo de variaciones.
     """
     try:
-        texto = _generar(_prompt(entrada), timeout)
+        prompt = _prompt(entrada)
+        if IA_PROVEEDOR == "azure_foundry":
+            texto = _generar_foundry(prompt, timeout)
+        else:
+            texto = _generar_ollama(prompt, timeout)
     except Exception as exc:
         return {"texto": f"No se pudo generar la observación: {exc}",
                 "verificado": False, "cifras_no_verificadas": [], "error": True}
@@ -76,9 +90,34 @@ def redactar_observacion(entrada: dict, timeout: int = 60) -> dict:
             "cifras_no_verificadas": faltantes, "error": False}
 
 
-def _generar(prompt: str, timeout: int) -> str:
+def _quitar_pensamiento(texto: str) -> str:
+    """Por si el modelo (Qwen, Phi-4-reasoning) filtra su razonamiento
+    interno al texto en vez de mantenerlo aparte -- no debe llegar ni a
+    la observación final ni a la verificación de cifras."""
+    return re.sub(r"<think>.*?</think>", "", texto, flags=re.S).strip()
+
+
+def _generar_foundry(prompt: str, timeout: int) -> str:
+    from openai import OpenAI   # importado aquí: no todos los entornos lo instalan
+
+    if not (AZURE_AI_ENDPOINT and AZURE_AI_DEPLOYMENT and AZURE_AI_API_KEY):
+        raise RuntimeError(
+            "Faltan AZURE_AI_ENDPOINT / AZURE_AI_DEPLOYMENT / AZURE_AI_API_KEY"
+        )
+
+    client = OpenAI(base_url=AZURE_AI_ENDPOINT, api_key=AZURE_AI_API_KEY,
+                    timeout=timeout)
+    r = client.chat.completions.create(
+        model=AZURE_AI_DEPLOYMENT,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.2,
+    )
+    return _quitar_pensamiento(r.choices[0].message.content)
+
+
+def _generar_ollama(prompt: str, timeout: int) -> str:
     payload = json.dumps({
-        "model": MODELO, "prompt": prompt, "stream": False,
+        "model": MODELO, "prompt": prompt + " /no_think", "stream": False,
         "think": False,   # ignorado sin daño por modelos que no soportan pensar
         "options": {"temperature": 0.2},
     }).encode("utf-8")
@@ -88,9 +127,7 @@ def _generar(prompt: str, timeout: int) -> str:
     )
     with urllib.request.urlopen(req, timeout=timeout) as r:
         texto = json.loads(r.read())["response"]
-    # Por si el servidor de Ollama es viejo y no respeta think=False: quita
-    # cualquier bloque de razonamiento que se haya filtrado a la respuesta.
-    return re.sub(r"<think>.*?</think>", "", texto, flags=re.S).strip()
+    return _quitar_pensamiento(texto)
 
 
 # --------------------------------------------------------------- verificación
