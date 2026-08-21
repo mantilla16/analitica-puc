@@ -314,8 +314,20 @@ def detalle_cuenta(encargo_id: str, codigo: str) -> dict:
 @app.get("/encargos/{encargo_id}/variaciones/{fase}/observaciones")
 def observaciones_ia(encargo_id: str, fase: str) -> list[dict]:
     """Una observación redactada por IA por cuenta significativa de la
-    fase. Puede tardar: llama al modelo local una vez por cuenta."""
+    fase. Puede tardar: llama al modelo local una vez por cuenta. Sin uso
+    desde el frontend hoy -- ver /observacion/{codigo}."""
     return A.observaciones(encargo_id, fase)
+
+
+@app.get("/encargos/{encargo_id}/variaciones/{fase}/observacion/{codigo}")
+def observacion_cuenta(encargo_id: str, fase: str, codigo: str) -> dict:
+    """Una sola observación de IA, a pedido -- una llamada al modelo por
+    clic, para no acumular varias en una petición que pueda exceder
+    cualquier timeout razonable."""
+    r = A.observacion_cuenta(encargo_id, fase, codigo)
+    if r is None:
+        raise HTTPException(404, "Cuenta no encontrada en las variaciones de esta fase")
+    return r
 
 
 # -------------------------------------------------------------------- alertas

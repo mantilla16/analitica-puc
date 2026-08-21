@@ -365,31 +365,51 @@ def _entrada_observacion(fila: dict, patrones: list[dict],
     }
 
 
+def _entrada_para(d: dict, encargo_id: str, fila: dict) -> dict:
+    act_id = carga_de(encargo_id, "BAL_ACTUAL")
+    comparativo_id = (carga_de(encargo_id, "BAL_CIERRE_ANTERIOR") if fila["clase"] <= "3"
+                      else carga_de(encargo_id, "BAL_CORTE_ANTERIOR"))
+    mov_id = carga_de(encargo_id, "MOV_ACTUAL")
+    patrones = _patrones_cuenta(mov_id, fila["cuenta"])
+    auxiliares = _auxiliares_variacion(act_id, comparativo_id, fila["cuenta"],
+                                       fila["variacion"])
+    return _entrada_observacion(fila, patrones, auxiliares)
+
+
+def observacion_cuenta(encargo_id: str, fase: str, codigo: str) -> dict | None:
+    """Una sola observación de IA, a pedido -- para no depender de generar
+    todas las significativas en una sola petición (con un proveedor en la
+    nube, varias cuentas en secuencia pueden tardar más que cualquier
+    timeout razonable). None si la cuenta no está entre las variaciones
+    de esta fase."""
+    d = variaciones(encargo_id, fase)
+    if not d["listo"] or not d["aplica"]:
+        return None
+    fila = next((f for f in d["filas"] if f["cuenta"] == codigo), None)
+    if fila is None:
+        return None
+    entrada = _entrada_para(d, encargo_id, fila)
+    return {"cuenta": codigo, **ia.redactar_observacion(entrada)}
+
+
 def observaciones(encargo_id: str, fase: str | None = None) -> list[dict]:
     """Una observación de IA por cada cuenta significativa de la fase.
 
-    Puede ser lenta -- una llamada al modelo local por cuenta -- pero no
-    calcula nada nuevo, solo redacta sobre lo que variaciones() ya dejó
-    calculado.
+    Puede ser lenta -- una llamada al modelo por cuenta, en secuencia --
+    pero no calcula nada nuevo, solo redacta sobre lo que variaciones()
+    ya dejó calculado. Sin uso desde el frontend hoy (ver
+    observacion_cuenta) -- se deja por si algún día tiene sentido un
+    reporte generado en segundo plano.
     """
     d = variaciones(encargo_id, fase)
     if not d["listo"] or not d["aplica"]:
         return []
 
-    act_id = carga_de(encargo_id, "BAL_ACTUAL")
-    cie_id = carga_de(encargo_id, "BAL_CIERRE_ANTERIOR")
-    cor_id = carga_de(encargo_id, "BAL_CORTE_ANTERIOR")
-    mov_id = carga_de(encargo_id, "MOV_ACTUAL")
-
     salida = []
     for f in d["filas"]:
         if not f["significativa"]:
             continue
-        comparativo_id = cie_id if f["clase"] <= "3" else cor_id
-        patrones = _patrones_cuenta(mov_id, f["cuenta"])
-        auxiliares = _auxiliares_variacion(act_id, comparativo_id, f["cuenta"],
-                                           f["variacion"])
-        entrada = _entrada_observacion(f, patrones, auxiliares)
+        entrada = _entrada_para(d, encargo_id, f)
         r = ia.redactar_observacion(entrada)
         salida.append({"cuenta": f["cuenta"], **r})
     return salida

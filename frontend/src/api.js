@@ -50,6 +50,8 @@ export const api = {
   variaciones: (id, fase) =>
     pedir(`/encargos/${id}/variaciones${fase ? `?fase=${fase}` : ""}`),
   observaciones: (id, fase) => pedir(`/encargos/${id}/variaciones/${fase}/observaciones`),
+  observacionCuenta: (id, fase, codigo) =>
+    pedir(`/encargos/${id}/variaciones/${fase}/observacion/${codigo}`),
   detalleCuenta: (id, codigo) => pedir(`/encargos/${id}/cuentas/${codigo}`),
 };
 

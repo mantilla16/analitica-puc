@@ -47,7 +47,7 @@ export default function Variaciones({ encargoId }) {
   const [soloSig, setSoloSig] = useState(true);
   const [error, setError] = useState(null);
   const [obs, setObs] = useState({});
-  const [cargandoObs, setCargandoObs] = useState(false);
+  const [generando, setGenerando] = useState({});
 
   useEffect(() => { api.fases().then(setFases).catch(() => {}); }, []);
 
@@ -57,14 +57,19 @@ export default function Variaciones({ encargoId }) {
       .catch((e) => setError(e.message));
   }, [encargoId, fase]);
 
-  useEffect(() => {
-    if (!d?.listo || !d.aplica || !d.significativas) { setObs({}); return; }
-    setCargandoObs(true);
-    api.observaciones(encargoId, d.fase)
-      .then((r) => setObs(Object.fromEntries(r.map((o) => [o.cuenta, o]))))
-      .catch(() => {})
-      .finally(() => setCargandoObs(false));
-  }, [encargoId, d?.fase, d?.listo, d?.aplica, d?.significativas]);
+  useEffect(() => { setObs({}); }, [encargoId, d?.fase]);
+
+  async function explicar(codigo) {
+    setGenerando((g) => ({ ...g, [codigo]: true }));
+    try {
+      const r = await api.observacionCuenta(encargoId, d.fase, codigo);
+      setObs((o) => ({ ...o, [codigo]: r }));
+    } catch (err) {
+      setObs((o) => ({ ...o, [codigo]: { texto: err.message, verificado: false } }));
+    } finally {
+      setGenerando((g) => ({ ...g, [codigo]: false }));
+    }
+  }
 
   if (error) return <Aviso tono="error">{error}</Aviso>;
   if (!d) return <p className="text-sm text-tinta-suave">Calculando…</p>;
@@ -208,12 +213,6 @@ export default function Variaciones({ encargoId }) {
         </div>
       )}
 
-      {cargandoObs && (
-        <p className="text-xs text-tinta-suave">
-          Generando observaciones con IA para las cuentas significativas…
-        </p>
-      )}
-
       {/* --------------------------------------------------------- tabla */}
       <div className="overflow-x-auto border border-regla bg-papel-alto">
         <table className="w-full text-sm">
@@ -226,12 +225,13 @@ export default function Variaciones({ encargoId }) {
               <th className="px-3 py-2 text-right font-normal">Variación</th>
               <th className="px-3 py-2 text-right font-normal">%</th>
               <th className="px-3 py-2 font-normal">Motivo</th>
+              <th className="px-3 py-2 font-normal">IA</th>
             </tr>
           </thead>
           <tbody>
             {filas.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-3 py-10 text-center text-tinta-suave">
+                <td colSpan={8} className="px-3 py-10 text-center text-tinta-suave">
                   Ninguna cuenta supera el umbral. Quite el filtro para ver todas.
                 </td>
               </tr>
@@ -260,10 +260,21 @@ export default function Variaciones({ encargoId }) {
                   <td className={`px-3 py-2 text-xs ${COLOR_MOTIVO[f.motivo] ?? "text-tinta-suave"}`}>
                     {f.motivo ?? "—"}
                   </td>
+                  <td className="px-3 py-2">
+                    {f.significativa && !obs[f.cuenta] && (
+                      <button
+                        onClick={() => explicar(f.cuenta)}
+                        disabled={generando[f.cuenta]}
+                        className="rotulo text-tinta-suave hover:text-verde disabled:opacity-40"
+                      >
+                        {generando[f.cuenta] ? "Generando…" : "Explicar"}
+                      </button>
+                    )}
+                  </td>
                 </tr>
-                {f.significativa && obs[f.cuenta] && (
+                {obs[f.cuenta] && (
                   <tr className="border-b border-regla-fina bg-papel-hondo">
-                    <td colSpan={7} className="px-3 py-2 text-xs leading-relaxed">
+                    <td colSpan={8} className="px-3 py-2 text-xs leading-relaxed">
                       <span className={obs[f.cuenta].verificado ? "text-verde" : "text-ambar"}>
                         {obs[f.cuenta].verificado ? "IA · cifras verificadas" : "IA · revisar cifra sin verificar"}
                       </span>
