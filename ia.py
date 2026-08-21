@@ -56,6 +56,10 @@ PROMPT_SISTEMA = (
     "- Si ni los patrones de movimiento ni la composición por auxiliar "
     "  explican bien la variación, dilo explícitamente en vez de inventar "
     "  una causa.\n"
+    "- Los montos ya vienen formateados en pesos colombianos (punto de "
+    "  miles, coma decimal) -- cópialos exactamente así, no los conviertas "
+    "  a notación de punto decimal. Menciona 'COP' o 'pesos colombianos' "
+    "  al menos una vez en la observación.\n"
     "- Responde en español, en prosa corrida, sin viñetas ni markdown."
 )
 

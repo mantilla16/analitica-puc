@@ -287,6 +287,20 @@ def detalle_cuenta(encargo_id: str, codigo: str) -> dict:
 # OBSERVACIONES DE IA
 # =====================================================================
 
+def _cop(v) -> str | None:
+    """1234567.89 -> '1.234.567,89'. Se formatea acá, no en el modelo --
+    si se le pide a la IA que la copie tal cual viene en el JSON (para no
+    inventar cifras), copia también la notación con punto decimal sin
+    separador de miles, que no es como se escribe un peso colombiano."""
+    if v is None:
+        return None
+    n = Decimal(v)
+    signo = "-" if n < 0 else ""
+    entero, dec = f"{abs(n):.2f}".split(".")
+    entero = f"{int(entero):,}".replace(",", ".")
+    return f"{signo}{entero},{dec}"
+
+
 def _patrones_cuenta(mov_id: str | None, codigo: str, limite: int = 8) -> list[dict]:
     if not mov_id:
         return []
@@ -336,8 +350,8 @@ def _auxiliares_variacion(act_id: str, comparativo_id: str, codigo: str,
             if variacion_cuenta else None
         filas.append({
             "codigo": cod, "nombre": nombre,
-            "saldo_actual": sa, "saldo_comparativo": sc,
-            "variacion": var, "pct_de_la_variacion_total": pct,
+            "saldo_actual": _cop(sa), "saldo_comparativo": _cop(sc),
+            "variacion": _cop(var), "pct_de_la_variacion_total": pct,
         })
     filas.sort(key=lambda f: abs(f["variacion"]), reverse=True)
     return filas[:limite]
@@ -349,16 +363,17 @@ def _entrada_observacion(fila: dict, patrones: list[dict],
     aritmética propia. Sin razón social ni NIT del cliente -- no le hace
     falta al modelo para explicar la variación de una cuenta."""
     return {
+        "moneda": "COP (pesos colombianos)",
         "cuenta": fila["cuenta"],
         "nombre_cuenta": fila["nombre"],
         "regla_comparativo": fila["regla"],
-        "saldo_actual": fila["saldo_actual"],
-        "saldo_comparativo": fila["saldo_comparativo"],
-        "variacion": fila["variacion"],
+        "saldo_actual": _cop(fila["saldo_actual"]),
+        "saldo_comparativo": _cop(fila["saldo_comparativo"]),
+        "variacion": _cop(fila["variacion"]),
         "variacion_pct": fila["variacion_pct"],
         "motivo_seleccion": fila["motivo"],
         "patrones_de_movimiento": [
-            {"descripcion": p["descripcion"], "veces": p["veces"], "neto": p["neto"]}
+            {"descripcion": p["descripcion"], "veces": p["veces"], "neto": _cop(p["neto"])}
             for p in patrones
         ],
         "composicion_auxiliar": auxiliares,
