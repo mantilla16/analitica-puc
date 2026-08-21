@@ -285,9 +285,23 @@ export default function Variaciones({ encargoId }) {
         </div>
       )}
 
-      {/* --------------------------------------------------------- tabla */}
+      {/* --------------------------------------------------------- tabla
+          `table-fixed` es lo que mantiene la tabla dentro del contenedor:
+          con ancho automático, el párrafo largo de la observación de IA
+          ensancha toda la tabla y saca de vista las primeras columnas.
+          El min-w deja que en pantallas angostas sí se pueda desplazar. */}
       <div className="overflow-x-auto border border-regla bg-papel-alto">
-        <table className="w-full text-sm">
+        <table className="w-full min-w-[900px] table-fixed text-sm">
+          <colgroup>
+            <col className="w-[8%]" />
+            <col className="w-[21%]" />
+            <col className="w-[14%]" />
+            <col className="w-[14%]" />
+            <col className="w-[14%]" />
+            <col className="w-[7%]" />
+            <col className="w-[12%]" />
+            <col className="w-[10%]" />
+          </colgroup>
           <thead className="border-b border-regla bg-papel-hondo">
             <tr className="rotulo text-left">
               <th className="px-3 py-2 font-normal">Cuenta</th>
@@ -311,22 +325,22 @@ export default function Variaciones({ encargoId }) {
             {filas.map((f) => (
               <Fragment key={f.cuenta}>
                 <tr className="border-b border-regla-fina hover:bg-papel-hondo">
-                  <td className="cifra px-3 py-2">{f.cuenta}</td>
-                  <td className="max-w-xs truncate px-3 py-2" title={f.nombre}>
+                  <td className="cifra whitespace-nowrap px-3 py-2">{f.cuenta}</td>
+                  <td className="truncate px-3 py-2" title={f.nombre}>
                     {f.nombre ?? "—"}
                   </td>
-                  <td className="cifra px-3 py-2 text-right text-xs">
+                  <td className="cifra whitespace-nowrap px-3 py-2 text-right text-xs">
                     {monto(f.saldo_actual)}
                   </td>
-                  <td className="cifra px-3 py-2 text-right text-xs text-tinta-suave">
+                  <td className="cifra whitespace-nowrap px-3 py-2 text-right text-xs text-tinta-suave">
                     {monto(f.saldo_comparativo)}
                   </td>
-                  <td className={`cifra px-3 py-2 text-right ${
+                  <td className={`cifra whitespace-nowrap px-3 py-2 text-right ${
                     Number(f.variacion) < 0 ? "text-rojo" : ""
                   }`}>
                     {monto(f.variacion)}
                   </td>
-                  <td className="cifra px-3 py-2 text-right text-xs text-tinta-suave">
+                  <td className="cifra whitespace-nowrap px-3 py-2 text-right text-xs text-tinta-suave">
                     {f.variacion_pct === null ? "—" : `${f.variacion_pct}%`}
                   </td>
                   <td className={`px-3 py-2 text-xs ${COLOR_MOTIVO[f.motivo] ?? "text-tinta-suave"}`}>
@@ -369,7 +383,7 @@ export default function Variaciones({ encargoId }) {
                         </button>
                       </div>
 
-                      <p className="mt-1 text-xs leading-relaxed text-tinta-media">
+                      <p className="mt-1 break-words text-xs leading-relaxed text-tinta-media">
                         {obs[f.cuenta].texto}
                       </p>
 
