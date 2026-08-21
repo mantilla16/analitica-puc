@@ -565,3 +565,80 @@ def hallazgos(carga_id: str) -> list[dict]:
         "SELECT * FROM core.hallazgo WHERE carga_id=%s ORDER BY detectado_en",
         (carga_id,),
     )
+
+
+# =====================================================================
+# OBSERVACIONES DE IA
+# =====================================================================
+
+def guardar_observacion_ia(cliente_id: str, encargo_id: str, fase: str,
+                           codigo_puc: str, texto: str, verificado: bool,
+                           cifras: list, entrada: dict, instruccion: str | None,
+                           modelo: str | None, usuario: str | None) -> dict:
+    """Append-only: cada llamada crea una versión nueva, nunca sobrescribe.
+    Los jsonb van con cast explícito -- `entrada` trae Decimal, así que se
+    serializa con default=str en vez de dejárselo al adaptador."""
+    with conn() as c:
+        v = c.execute(
+            """SELECT coalesce(max(version),0)+1 AS v FROM core.observacion_ia
+               WHERE encargo_id=%s AND fase=%s AND codigo_puc=%s""",
+            (encargo_id, fase, codigo_puc),
+        ).fetchone()["v"]
+        fila = c.execute(
+            """INSERT INTO core.observacion_ia
+                 (cliente_id, encargo_id, fase, codigo_puc, version, texto,
+                  verificado, cifras_no_verificadas, entrada,
+                  instruccion_auditor, modelo, creado_por)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s,%s)
+               RETURNING *""",
+            (cliente_id, encargo_id, fase, codigo_puc, v, texto, verificado,
+             json.dumps(cifras or []), json.dumps(entrada, default=str),
+             instruccion, modelo, usuario),
+        ).fetchone()
+        c.commit()
+        return fila
+
+
+def observaciones_ia_vigentes(encargo_id: str, fase: str) -> list[dict]:
+    """La versión más reciente por cuenta. Es lo que pinta Variaciones al
+    abrirse, sin volver a llamar al modelo."""
+    return varios(
+        """SELECT DISTINCT ON (codigo_puc)
+                  codigo_puc, version, texto, verificado, cifras_no_verificadas,
+                  instruccion_auditor, modelo, creado_por, creado_en
+           FROM core.observacion_ia
+           WHERE encargo_id=%s AND fase=%s
+           ORDER BY codigo_puc, version DESC""",
+        (encargo_id, fase),
+    )
+
+
+def observacion_ia_ultima(encargo_id: str, fase: str, codigo_puc: str) -> dict | None:
+    return uno(
+        """SELECT * FROM core.observacion_ia
+           WHERE encargo_id=%s AND fase=%s AND codigo_puc=%s
+           ORDER BY version DESC LIMIT 1""",
+        (encargo_id, fase, codigo_puc),
+    )
+
+
+def historia_observaciones_ia(cliente_id: str, codigo_puc: str | None = None,
+                              limite: int = 200) -> list[dict]:
+    """Todo lo que la IA ha redactado para este CLIENTE, en cualquier
+    encargo o fase -- el repositorio completo, no solo el corte actual."""
+    where = ["o.cliente_id=%s"]
+    args: list = [cliente_id]
+    if codigo_puc:
+        where.append("o.codigo_puc=%s")
+        args.append(codigo_puc)
+    return varios(
+        f"""SELECT o.id, o.codigo_puc, o.version, o.texto, o.verificado,
+                   o.instruccion_auditor, o.modelo, o.creado_por, o.creado_en,
+                   o.fase, e.fecha_corte
+            FROM core.observacion_ia o
+            LEFT JOIN core.encargo e ON e.id = o.encargo_id
+            WHERE {' AND '.join(where)}
+            ORDER BY o.creado_en DESC
+            LIMIT {int(limite)}""",
+        tuple(args),
+    )

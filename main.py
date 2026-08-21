@@ -65,6 +65,14 @@ class Parametros(BaseModel):
     pct_trivialidad: Decimal = Field(default=Decimal("5"), ge=0)
 
 
+class LoteObservaciones(BaseModel):
+    codigos: list[str]
+
+
+class AjusteObservacion(BaseModel):
+    instruccion: str | None = None
+
+
 class MapeoConfirmado(BaseModel):
     hoja: str
     columnas: dict[str, str | None]
@@ -311,29 +319,38 @@ def detalle_cuenta(encargo_id: str, codigo: str) -> dict:
     return A.detalle_cuenta(encargo_id, codigo)
 
 
-@app.get("/encargos/{encargo_id}/variaciones/{fase}/observaciones")
-def observaciones_ia(encargo_id: str, fase: str) -> list[dict]:
-    """Una observación redactada por IA por cuenta significativa de la
-    fase. Puede tardar: llama al modelo local una vez por cuenta. Sin uso
-    desde el frontend hoy -- ver /observacion/{codigo}."""
-    return A.observaciones(encargo_id, fase)
+@app.get("/encargos/{encargo_id}/variaciones/{fase}/observaciones/guardadas")
+def observaciones_guardadas(encargo_id: str, fase: str) -> list[dict]:
+    """Lo que la IA ya redactó para esta fase, tal como quedó guardado.
+    No llama al modelo: es lo que pinta Variaciones al abrirse."""
+    return A.observaciones_guardadas(encargo_id, fase)
 
 
-@app.get("/encargos/{encargo_id}/variaciones/{fase}/observaciones/lote")
-def observaciones_lote(encargo_id: str, fase: str, codigos: str) -> list[dict]:
+@app.get("/encargos/{encargo_id}/observaciones/historia")
+def historia_observaciones(encargo_id: str, codigo: str | None = None) -> list[dict]:
+    """Repositorio completo del cliente dueño de este encargo: todas las
+    versiones que ha redactado la IA, de todos los encargos y fases."""
+    return A.historia_observaciones(encargo_id, codigo)
+
+
+@app.post("/encargos/{encargo_id}/variaciones/{fase}/observaciones/lote")
+def observaciones_lote(encargo_id: str, fase: str, l: LoteObservaciones,
+                       usuario: str | None = None) -> list[dict]:
     """Varias observaciones a la vez, en paralelo -- para pedirse en
     lotes chicos (ej. 5) desde el frontend en vez de una por una o
-    todas juntas en secuencia. `codigos` es una lista separada por comas."""
-    lista = [c for c in codigos.split(",") if c]
-    return A.observaciones_lote(encargo_id, fase, lista)
+    todas juntas en secuencia. Cada una queda guardada."""
+    return A.observaciones_lote(encargo_id, fase, l.codigos, usuario)
 
 
-@app.get("/encargos/{encargo_id}/variaciones/{fase}/observacion/{codigo}")
-def observacion_cuenta(encargo_id: str, fase: str, codigo: str) -> dict:
-    """Una sola observación de IA, a pedido -- una llamada al modelo por
-    clic, para no acumular varias en una petición que pueda exceder
-    cualquier timeout razonable."""
-    r = A.observacion_cuenta(encargo_id, fase, codigo)
+@app.post("/encargos/{encargo_id}/variaciones/{fase}/observacion/{codigo}")
+def observacion_cuenta(encargo_id: str, fase: str, codigo: str,
+                       a: AjusteObservacion | None = None,
+                       usuario: str | None = None) -> dict:
+    """Genera la observación de una cuenta y la guarda. Con `instruccion`
+    reajusta la última versión según lo que indique el auditor, dejando
+    una versión nueva sin borrar la anterior."""
+    r = A.observacion_cuenta(encargo_id, fase, codigo,
+                             a.instruccion if a else None, usuario)
     if r is None:
         raise HTTPException(404, "Cuenta no encontrada en las variaciones de esta fase")
     return r

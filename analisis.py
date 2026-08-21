@@ -394,23 +394,65 @@ def _entrada_para(d: dict, encargo_id: str, fila: dict) -> dict:
     return _entrada_observacion(fila, patrones, auxiliares)
 
 
-def observacion_cuenta(encargo_id: str, fase: str, codigo: str) -> dict | None:
-    """Una sola observación de IA, a pedido -- para no depender de generar
-    todas las significativas en una sola petición (con un proveedor en la
-    nube, varias cuentas en secuencia pueden tardar más que cualquier
-    timeout razonable). None si la cuenta no está entre las variaciones
-    de esta fase."""
+def _generar_y_guardar(d: dict, encargo_id: str, cliente_id: str, fase: str,
+                       fila: dict, instruccion: str | None = None,
+                       usuario: str | None = None) -> dict:
+    """Redacta y persiste. Si viene `instruccion`, se le pasa al modelo
+    junto con el texto de la versión anterior, para que ajuste en vez de
+    empezar de cero -- y queda una versión nueva, sin borrar la previa."""
+    previo = None
+    if instruccion:
+        anterior = db.observacion_ia_ultima(encargo_id, fase, fila["cuenta"])
+        previo = anterior["texto"] if anterior else None
+
+    entrada = _entrada_para(d, encargo_id, fila)
+    r = ia.redactar_observacion(entrada, instruccion=instruccion, previo=previo)
+
+    if r.get("error"):
+        # Un fallo del modelo no se guarda como si fuera un análisis: se
+        # devuelve para mostrarlo y que se pueda reintentar.
+        return {"codigo_puc": fila["cuenta"], "version": None, **r}
+
+    return db.guardar_observacion_ia(
+        cliente_id=cliente_id, encargo_id=encargo_id, fase=fase,
+        codigo_puc=fila["cuenta"], texto=r["texto"], verificado=r["verificado"],
+        cifras=r["cifras_no_verificadas"], entrada=entrada,
+        instruccion=instruccion, modelo=ia.modelo_actual(), usuario=usuario,
+    )
+
+
+def observaciones_guardadas(encargo_id: str, fase: str) -> list[dict]:
+    """Lo ya redactado para esta fase, sin volver a llamar al modelo."""
+    return db.observaciones_ia_vigentes(encargo_id, fase)
+
+
+def historia_observaciones(encargo_id: str, codigo: str | None = None) -> list[dict]:
+    """El repositorio completo del CLIENTE dueño de este encargo: todas
+    las versiones, de todos los encargos y fases."""
+    enc = db.encargo(encargo_id)
+    if not enc:
+        return []
+    return db.historia_observaciones_ia(enc["cliente_id"], codigo)
+
+
+def observacion_cuenta(encargo_id: str, fase: str, codigo: str,
+                       instruccion: str | None = None,
+                       usuario: str | None = None) -> dict | None:
+    """Genera (o reajusta) y guarda la observación de una cuenta. None si
+    la cuenta no está entre las variaciones de esta fase."""
     d = variaciones(encargo_id, fase)
     if not d["listo"] or not d["aplica"]:
         return None
     fila = next((f for f in d["filas"] if f["cuenta"] == codigo), None)
     if fila is None:
         return None
-    entrada = _entrada_para(d, encargo_id, fila)
-    return {"cuenta": codigo, **ia.redactar_observacion(entrada)}
+    enc = db.encargo(encargo_id)
+    return _generar_y_guardar(d, encargo_id, enc["cliente_id"], fase, fila,
+                              instruccion, usuario)
 
 
-def observaciones_lote(encargo_id: str, fase: str, codigos: list[str]) -> list[dict]:
+def observaciones_lote(encargo_id: str, fase: str, codigos: list[str],
+                       usuario: str | None = None) -> list[dict]:
     """Varias observaciones a la vez, EN PARALELO -- pensado para pedirse
     en lotes chicos desde el frontend (ej. de 5 en 5), así el tiempo de
     la petición es el de la cuenta más lenta del lote, no la suma de
@@ -424,32 +466,14 @@ def observaciones_lote(encargo_id: str, fase: str, codigos: list[str]) -> list[d
     if not seleccion:
         return []
 
+    enc = db.encargo(encargo_id)
+    cliente_id = enc["cliente_id"]
+
     def _una(fila: dict) -> dict:
-        entrada = _entrada_para(d, encargo_id, fila)
-        return {"cuenta": fila["cuenta"], **ia.redactar_observacion(entrada)}
+        return _generar_y_guardar(d, encargo_id, cliente_id, fase, fila,
+                                  usuario=usuario)
 
     with ThreadPoolExecutor(max_workers=len(seleccion)) as ex:
         return list(ex.map(_una, seleccion))
 
 
-def observaciones(encargo_id: str, fase: str | None = None) -> list[dict]:
-    """Una observación de IA por cada cuenta significativa de la fase.
-
-    Puede ser lenta -- una llamada al modelo por cuenta, en secuencia --
-    pero no calcula nada nuevo, solo redacta sobre lo que variaciones()
-    ya dejó calculado. Sin uso desde el frontend hoy (ver
-    observacion_cuenta) -- se deja por si algún día tiene sentido un
-    reporte generado en segundo plano.
-    """
-    d = variaciones(encargo_id, fase)
-    if not d["listo"] or not d["aplica"]:
-        return []
-
-    salida = []
-    for f in d["filas"]:
-        if not f["significativa"]:
-            continue
-        entrada = _entrada_para(d, encargo_id, f)
-        r = ia.redactar_observacion(entrada)
-        salida.append({"cuenta": f["cuenta"], **r})
-    return salida

@@ -259,6 +259,33 @@ nueva o modificada con fecha anterior al 1 de enero del año de corte).
 marca `ENVIADA` y se registra `destinatario`/`enviada_en` -- el punto de
 enganche para SMTP o Slack ya está ahí, falta conectarlo.
 
+### `core.observacion_ia`
+El repositorio de análisis de IA, **append-only** y anclado al
+**cliente** (no al encargo): borrar un encargo no borra su historia de
+análisis, porque `encargo_id` es `ON DELETE SET NULL`. Una fila por cada
+vez que la IA redactó sobre una cuenta; la vigente es la de mayor
+`version` para `(encargo_id, fase, codigo_puc)`.
+
+Columnas que importan más allá de lo obvio:
+
+- **`entrada`** (jsonb) -- el JSON exacto de agregados que recibió el
+  modelo. Es la evidencia de sobre qué cifras redactó, y es lo que se
+  vuelve a enviar cuando el auditor pide un ajuste.
+- **`instruccion_auditor`** -- `NULL` en la primera versión; con texto
+  cuando esa versión nació de un ajuste pedido por el auditor.
+- **`verificado`** / **`cifras_no_verificadas`** -- el resultado del
+  chequeo de `ia.py`: si el texto mencionó algún número que no estaba en
+  `entrada`, queda registrado cuál.
+- **`modelo`** -- proveedor y modelo que redactó (`ollama:qwen3:4b`,
+  `azure_foundry:DeepSeek-V4-Pro`). Necesario para saber qué escribió
+  qué, sobre todo mientras se comparan proveedores.
+
+Al abrir Variaciones se pinta lo guardado y solo se manda a generar lo
+que falta -- recargar la página no vuelve a pagar el análisis completo.
+
+**Nota:** esta tabla se agrega con `10_observacion_ia.sql`, que todavía
+no está incorporado en `schema.sql`.
+
 ---
 
 ## Una tabla huérfana

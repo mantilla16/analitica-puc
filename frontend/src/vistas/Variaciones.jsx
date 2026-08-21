@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState } from "react";
-import { api, monto, entero } from "../api";
+import { api, monto, entero, fecha } from "../api";
 import { Aviso } from "../comp/Piezas";
 
 /** Convierte el desglose del residuo en el argumento redactado, con las
@@ -58,27 +58,41 @@ export default function Variaciones({ encargoId }) {
   }, [encargoId, fase]);
 
   const [progreso, setProgreso] = useState(null);   // {hecho, total} mientras corren los lotes
+  const [ajuste, setAjuste] = useState({});         // {codigo: texto que escribe el auditor}
+  const [historial, setHistorial] = useState(null); // panel lateral
 
-  useEffect(() => { setObs({}); setProgreso(null); }, [encargoId, d?.fase]);
+  useEffect(() => { setObs({}); setProgreso(null); setAjuste({}); }, [encargoId, d?.fase]);
 
+  /* Primero se pinta lo que ya está guardado; solo se manda a generar lo
+     que falta. Recargar la página no vuelve a pagar el análisis completo. */
   useEffect(() => {
     if (!d?.listo || !d.aplica) return;
-    const codigos = d.filas.filter((f) => f.significativa).map((f) => f.cuenta);
-    if (!codigos.length) return;
-
     let vivo = true;
     const TAMANO_LOTE = 5;
 
     (async () => {
-      for (let i = 0; i < codigos.length; i += TAMANO_LOTE) {
+      let guardadas = {};
+      try {
+        const r = await api.observacionesGuardadas(encargoId, d.fase);
+        guardadas = Object.fromEntries(r.map((x) => [x.codigo_puc, x]));
+      } catch { /* sin guardadas, se generan todas */ }
+      if (!vivo) return;
+      setObs(guardadas);
+
+      const faltan = d.filas
+        .filter((f) => f.significativa && !guardadas[f.cuenta])
+        .map((f) => f.cuenta);
+      if (!faltan.length) return;
+
+      for (let i = 0; i < faltan.length; i += TAMANO_LOTE) {
         if (!vivo) return;
-        const lote = codigos.slice(i, i + TAMANO_LOTE);
-        setProgreso({ hecho: i, total: codigos.length });
+        const lote = faltan.slice(i, i + TAMANO_LOTE);
+        setProgreso({ hecho: i, total: faltan.length });
         setGenerando((g) => ({ ...g, ...Object.fromEntries(lote.map((c) => [c, true])) }));
         try {
           const r = await api.observacionesLote(encargoId, d.fase, lote);
           if (!vivo) return;
-          setObs((o) => ({ ...o, ...Object.fromEntries(r.map((x) => [x.cuenta, x])) }));
+          setObs((o) => ({ ...o, ...Object.fromEntries(r.map((x) => [x.codigo_puc, x])) }));
         } catch (err) {
           if (!vivo) return;
           setObs((o) => ({
@@ -95,15 +109,26 @@ export default function Variaciones({ encargoId }) {
     return () => { vivo = false; };
   }, [encargoId, d?.fase, d?.listo, d?.aplica]);
 
-  async function explicar(codigo) {
+  async function explicar(codigo, instruccion = null) {
     setGenerando((g) => ({ ...g, [codigo]: true }));
     try {
-      const r = await api.observacionCuenta(encargoId, d.fase, codigo);
+      const r = await api.observacionCuenta(encargoId, d.fase, codigo, instruccion);
       setObs((o) => ({ ...o, [codigo]: r }));
+      setAjuste((a) => ({ ...a, [codigo]: "" }));
     } catch (err) {
       setObs((o) => ({ ...o, [codigo]: { texto: err.message, verificado: false } }));
     } finally {
       setGenerando((g) => ({ ...g, [codigo]: false }));
+    }
+  }
+
+  async function verHistorial(codigo = null) {
+    setHistorial({ codigo, filas: null });
+    try {
+      const filas = await api.historiaObservaciones(encargoId, codigo);
+      setHistorial({ codigo, filas });
+    } catch (err) {
+      setHistorial({ codigo, filas: [], error: err.message });
     }
   }
 
@@ -176,6 +201,10 @@ export default function Variaciones({ encargoId }) {
                  onChange={(e) => setSoloSig(e.target.checked)} />
           Solo las que superan el umbral
         </label>
+        <button onClick={() => verHistorial(null)}
+                className="rotulo text-tinta-suave hover:text-tinta">
+          Histórico de análisis
+        </button>
       </div>
 
       {/* ---------------------------------------------- control de alcance */}
@@ -304,24 +333,72 @@ export default function Variaciones({ encargoId }) {
                     {f.motivo ?? "—"}
                   </td>
                   <td className="px-3 py-2">
-                    {f.significativa && !obs[f.cuenta] && (
+                    {/* Sin `version` no hay análisis guardado: o nunca se
+                        generó, o el intento falló y hay que reintentar. */}
+                    {f.significativa && !obs[f.cuenta]?.version && (
                       <button
                         onClick={() => explicar(f.cuenta)}
                         disabled={generando[f.cuenta]}
                         className="rotulo text-tinta-suave hover:text-verde disabled:opacity-40"
                       >
-                        {generando[f.cuenta] ? "Generando…" : "Explicar"}
+                        {generando[f.cuenta]
+                          ? "Generando…"
+                          : obs[f.cuenta] ? "Reintentar" : "Explicar"}
                       </button>
                     )}
                   </td>
                 </tr>
                 {obs[f.cuenta] && (
                   <tr className="border-b border-regla-fina bg-papel-hondo">
-                    <td colSpan={8} className="px-3 py-2 text-xs leading-relaxed">
-                      <span className={obs[f.cuenta].verificado ? "text-verde" : "text-ambar"}>
-                        {obs[f.cuenta].verificado ? "IA · cifras verificadas" : "IA · revisar cifra sin verificar"}
-                      </span>
-                      <span className="ml-2 text-tinta-media">{obs[f.cuenta].texto}</span>
+                    <td colSpan={8} className="px-3 py-3">
+                      <div className="flex items-baseline gap-2">
+                        <span className={obs[f.cuenta].verificado ? "rotulo text-verde" : "rotulo text-ambar"}>
+                          {obs[f.cuenta].verificado ? "IA · cifras verificadas" : "IA · revisar cifra sin verificar"}
+                        </span>
+                        {obs[f.cuenta].version && (
+                          <span className="rotulo text-tinta-suave">
+                            v{obs[f.cuenta].version}
+                            {obs[f.cuenta].creado_en && ` · ${fecha(obs[f.cuenta].creado_en)}`}
+                          </span>
+                        )}
+                        <button
+                          onClick={() => verHistorial(f.cuenta)}
+                          className="rotulo ml-auto text-tinta-suave hover:text-tinta"
+                        >
+                          Versiones
+                        </button>
+                      </div>
+
+                      <p className="mt-1 text-xs leading-relaxed text-tinta-media">
+                        {obs[f.cuenta].texto}
+                      </p>
+
+                      {obs[f.cuenta].instruccion_auditor && (
+                        <p className="mt-1 text-xs italic text-tinta-suave">
+                          Ajustada con: “{obs[f.cuenta].instruccion_auditor}”
+                        </p>
+                      )}
+
+                      <div className="mt-2 flex gap-2">
+                        <input
+                          value={ajuste[f.cuenta] ?? ""}
+                          onChange={(e) => setAjuste((a) => ({ ...a, [f.cuenta]: e.target.value }))}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && ajuste[f.cuenta]?.trim()) {
+                              explicar(f.cuenta, ajuste[f.cuenta].trim());
+                            }
+                          }}
+                          placeholder="Pídele un ajuste: más breve, enfócate en el auxiliar X, menciona el riesgo…"
+                          className="flex-1 border border-regla bg-papel px-2 py-1 text-xs"
+                        />
+                        <button
+                          onClick={() => explicar(f.cuenta, ajuste[f.cuenta].trim())}
+                          disabled={generando[f.cuenta] || !ajuste[f.cuenta]?.trim()}
+                          className="rotulo border border-regla px-2 py-1 hover:bg-papel disabled:opacity-40"
+                        >
+                          {generando[f.cuenta] ? "Ajustando…" : "Ajustar"}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 )}
@@ -343,6 +420,73 @@ export default function Variaciones({ encargoId }) {
           Las clases 1, 2 y 3 se comparan contra el cierre del año anterior; las
           clases 4 a 7, contra el mismo corte del año pasado.
         </p>
+      </div>
+
+      {historial && (
+        <Historial h={historial} onCerrar={() => setHistorial(null)} />
+      )}
+    </div>
+  );
+}
+
+/** Repositorio de análisis del cliente: todas las versiones, de todos los
+ *  encargos y fases. Nada se sobrescribe, así que acá queda el rastro
+ *  completo de lo que redactó la IA y de los ajustes que pidió el auditor. */
+function Historial({ h, onCerrar }) {
+  return (
+    <div className="fixed inset-0 z-20 flex justify-end bg-tinta/20" onClick={onCerrar}>
+      <div
+        className="h-full w-full max-w-2xl overflow-y-auto border-l border-regla bg-papel p-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-6 flex items-start justify-between">
+          <div>
+            <p className="rotulo">Histórico de análisis de IA</p>
+            <p className="mt-1 text-sm text-tinta-media">
+              {h.codigo ? `Cuenta ${h.codigo}` : "Todas las cuentas de este cliente"}
+            </p>
+          </div>
+          <button onClick={onCerrar} className="rotulo hover:text-tinta">Cerrar ✕</button>
+        </div>
+
+        {h.error && <Aviso tono="error">{h.error}</Aviso>}
+        {h.filas === null && (
+          <p className="text-sm text-tinta-suave">Cargando…</p>
+        )}
+        {h.filas?.length === 0 && (
+          <p className="text-sm text-tinta-suave">
+            Todavía no hay análisis guardados para este cliente.
+          </p>
+        )}
+
+        <div className="border-t border-regla">
+          {(h.filas ?? []).map((o) => (
+            <div key={o.id} className="border-b border-regla-fina py-3">
+              <div className="flex items-baseline gap-2">
+                <span className="cifra text-sm">{o.codigo_puc}</span>
+                <span className="rotulo text-tinta-suave">v{o.version}</span>
+                <span className={`rotulo ${o.verificado ? "text-verde" : "text-ambar"}`}>
+                  {o.verificado ? "verificada" : "sin verificar"}
+                </span>
+                <span className="rotulo ml-auto text-tinta-suave">
+                  {fecha(o.creado_en)}
+                  {o.fecha_corte && ` · corte ${fecha(o.fecha_corte)}`}
+                </span>
+              </div>
+              <p className="mt-1 text-xs leading-relaxed text-tinta-media">{o.texto}</p>
+              {o.instruccion_auditor && (
+                <p className="mt-1 text-xs italic text-tinta-suave">
+                  Ajuste pedido: “{o.instruccion_auditor}”
+                </p>
+              )}
+              <p className="mt-1 text-xs text-tinta-suave">
+                {o.fase}
+                {o.modelo && ` · ${o.modelo}`}
+                {o.creado_por && ` · ${o.creado_por}`}
+              </p>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );

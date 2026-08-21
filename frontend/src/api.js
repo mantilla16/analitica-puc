@@ -49,11 +49,16 @@ export const api = {
   balance: (id, params) => pedir(`/encargos/${id}/balance?${params}`),
   variaciones: (id, fase) =>
     pedir(`/encargos/${id}/variaciones${fase ? `?fase=${fase}` : ""}`),
-  observaciones: (id, fase) => pedir(`/encargos/${id}/variaciones/${fase}/observaciones`),
-  observacionCuenta: (id, fase, codigo) =>
-    pedir(`/encargos/${id}/variaciones/${fase}/observacion/${codigo}`),
+  observacionesGuardadas: (id, fase) =>
+    pedir(`/encargos/${id}/variaciones/${fase}/observaciones/guardadas`),
   observacionesLote: (id, fase, codigos) =>
-    pedir(`/encargos/${id}/variaciones/${fase}/observaciones/lote?codigos=${codigos.join(",")}`),
+    pedir(`/encargos/${id}/variaciones/${fase}/observaciones/lote`,
+          json("POST", { codigos })),
+  observacionCuenta: (id, fase, codigo, instruccion = null) =>
+    pedir(`/encargos/${id}/variaciones/${fase}/observacion/${codigo}`,
+          json("POST", { instruccion })),
+  historiaObservaciones: (id, codigo) =>
+    pedir(`/encargos/${id}/observaciones/historia${codigo ? `?codigo=${codigo}` : ""}`),
   detalleCuenta: (id, codigo) => pedir(`/encargos/${id}/cuentas/${codigo}`),
 };
 

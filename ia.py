@@ -64,23 +64,50 @@ PROMPT_SISTEMA = (
 )
 
 
-def _prompt(entrada: dict) -> str:
-    return (
-        f"{PROMPT_SISTEMA}\n\n"
-        f"JSON de entrada:\n{json.dumps(entrada, ensure_ascii=False, default=str)}\n\n"
-        f"Observación:"
-    )
+def modelo_actual() -> str:
+    """Queda registrado con cada observación guardada: sirve para saber
+    qué modelo redactó qué, sobre todo mientras se comparan proveedores."""
+    if IA_PROVEEDOR == "azure_foundry":
+        return f"azure_foundry:{AZURE_AI_DEPLOYMENT}"
+    return f"ollama:{MODELO}"
 
 
-def redactar_observacion(entrada: dict, timeout: int = 60) -> dict:
+def _prompt(entrada: dict, instruccion: str | None = None,
+            previo: str | None = None) -> str:
+    partes = [
+        PROMPT_SISTEMA,
+        f"JSON de entrada:\n{json.dumps(entrada, ensure_ascii=False, default=str)}",
+    ]
+    if previo:
+        partes.append(f"Observación que redactaste antes:\n{previo}")
+    if instruccion:
+        # Las reglas duras se repiten DESPUÉS de la instrucción del auditor:
+        # el ajuste cambia el enfoque o la redacción, no la prohibición de
+        # inventar cifras. Y de todos modos la verificación corre igual.
+        partes.append(
+            f"Ajuste que pide el auditor:\n{instruccion}\n\n"
+            "Rehaz la observación atendiendo ese ajuste, pero sin dejar de "
+            "cumplir las reglas de arriba: no calcules nada, no inventes "
+            "ninguna cifra que no esté en el JSON de entrada."
+        )
+    partes.append("Observación:")
+    return "\n\n".join(partes)
+
+
+def redactar_observacion(entrada: dict, timeout: int = 60,
+                         instruccion: str | None = None,
+                         previo: str | None = None) -> dict:
     """Llama al modelo (Ollama o Azure AI Foundry, según IA_PROVEEDOR) y
     verifica las cifras del texto contra la entrada.
+
+    `instruccion` es el ajuste que pide el auditor sobre una observación
+    ya redactada; `previo` es el texto de esa observación.
 
     Nunca lanza por errores del modelo/red: si no responde, devuelve un
     texto de aviso en vez de tumbar el flujo de variaciones.
     """
     try:
-        prompt = _prompt(entrada)
+        prompt = _prompt(entrada, instruccion, previo)
         if IA_PROVEEDOR == "azure_foundry":
             texto = _generar_foundry(prompt, timeout)
         else:

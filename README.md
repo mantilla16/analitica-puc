@@ -52,12 +52,18 @@ createdb -h localhost -U postgres auditoria_puc
 psql -h localhost -U postgres -d auditoria_puc -v ON_ERROR_STOP=1 -f db/schema.sql
 ```
 
-Los archivos `NN_descripcion.sql` sueltos en la raíz (como
-`08_materialidad.sql`) son el historial de migraciones que ya está
-incorporado en `db/schema.sql` -- quedan como registro, no se vuelven a
-correr sobre una base nueva. Si en el futuro aparece una migración con un
-número más alto que no esté todavía en `db/schema.sql`, esa sí hay que
-aplicarla aparte y luego regenerar el dump.
+`08_materialidad.sql` (raíz) ya está incorporado en `db/schema.sql` --
+queda como registro histórico, no se vuelve a correr.
+
+**`10_observacion_ia.sql` todavía NO está en el dump** y hay que aplicarlo
+después, tanto en una base nueva como en una existente:
+
+```bash
+psql -h localhost -U postgres -d auditoria_puc -v ON_ERROR_STOP=1 -f 10_observacion_ia.sql
+```
+
+Cuando se regenere `db/schema.sql` con un `pg_dump` nuevo, esa migración
+queda absorbida y este paso deja de ser necesario.
 
 ### 2. Backend
 
