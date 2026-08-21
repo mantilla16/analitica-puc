@@ -340,7 +340,7 @@ def _auxiliares_variacion(act_id: str, comparativo_id: str, codigo: str,
     act = _saldos(act_id)
     comp = _saldos(comparativo_id)
 
-    filas = []
+    crudas = []
     for cod in set(act) | set(comp):
         sa = Decimal(act[cod]["saldo_natural"]) if cod in act else Decimal(0)
         sc = Decimal(comp[cod]["saldo_natural"]) if cod in comp else Decimal(0)
@@ -348,13 +348,15 @@ def _auxiliares_variacion(act_id: str, comparativo_id: str, codigo: str,
         var = (sa - sc).quantize(Decimal("0.01"))
         pct = ((var / variacion_cuenta) * 100).quantize(Decimal("0.01")) \
             if variacion_cuenta else None
-        filas.append({
-            "codigo": cod, "nombre": nombre,
-            "saldo_actual": _cop(sa), "saldo_comparativo": _cop(sc),
-            "variacion": _cop(var), "pct_de_la_variacion_total": pct,
-        })
-    filas.sort(key=lambda f: abs(f["variacion"]), reverse=True)
-    return filas[:limite]
+        crudas.append((cod, nombre, sa, sc, var, pct))
+
+    crudas.sort(key=lambda t: abs(t[4]), reverse=True)   # t[4] = var, sin formatear
+    return [
+        {"codigo": cod, "nombre": nombre,
+         "saldo_actual": _cop(sa), "saldo_comparativo": _cop(sc),
+         "variacion": _cop(var), "pct_de_la_variacion_total": pct}
+        for cod, nombre, sa, sc, var, pct in crudas[:limite]
+    ]
 
 
 def _entrada_observacion(fila: dict, patrones: list[dict],
