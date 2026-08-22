@@ -68,9 +68,17 @@ export default function Variaciones({ encargoId }) {
   useEffect(() => {
     if (!d?.listo || !d.aplica) return;
     let vivo = true;
-    const TAMANO_LOTE = 5;
 
     (async () => {
+      // El tamaño del lote lo decide el servidor: 5 contra un endpoint en
+      // la nube, menos contra un Ollama en CPU.
+      let tamLote = 5;
+      try {
+        const cfg = await api.iaConfig();
+        if (cfg?.lote) tamLote = cfg.lote;
+      } catch { /* sin config, se usa el valor por defecto */ }
+      if (!vivo) return;
+
       let guardadas = {};
       try {
         const r = await api.observacionesGuardadas(encargoId, d.fase);
@@ -84,9 +92,9 @@ export default function Variaciones({ encargoId }) {
         .map((f) => f.cuenta);
       if (!faltan.length) return;
 
-      for (let i = 0; i < faltan.length; i += TAMANO_LOTE) {
+      for (let i = 0; i < faltan.length; i += tamLote) {
         if (!vivo) return;
-        const lote = faltan.slice(i, i + TAMANO_LOTE);
+        const lote = faltan.slice(i, i + tamLote);
         setProgreso({ hecho: i, total: faltan.length });
         setGenerando((g) => ({ ...g, ...Object.fromEntries(lote.map((c) => [c, true])) }));
         try {
@@ -272,7 +280,7 @@ export default function Variaciones({ encargoId }) {
 
       {progreso && (
         <p className="text-xs text-tinta-suave">
-          Generando observaciones con IA en lotes de 5 — {entero(progreso.hecho)} de{" "}
+          Generando observaciones con IA — {entero(progreso.hecho)} de{" "}
           {entero(progreso.total)}…
         </p>
       )}

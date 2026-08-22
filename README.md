@@ -93,21 +93,44 @@ Vite hace proxy de `/api` hacia `http://localhost:8000`.
 
 ### 4. IA (opcional, pero la pestaña Variaciones la usa automáticamente)
 
-```bash
-ollama pull qwen3:8b
-ollama serve
-```
-
-Variables opcionales (por defecto apuntan a una instancia local de Ollama):
+Dos proveedores, elegidos por `IA_PROVEEDOR`:
 
 | Variable | Default | Qué es |
 |---|---|---|
-| `OLLAMA_URL` | `http://localhost:11434` | Dónde corre el servidor de Ollama |
-| `OLLAMA_MODELO` | `qwen3:8b` | Modelo a usar para redactar observaciones |
+| `IA_PROVEEDOR` | `ollama` | `ollama` \| `azure_foundry` |
+| `IA_TIMEOUT` | `60` | Segundos de espera por observación |
+| `IA_LOTE` | `5` | Cuántas observaciones se piden por petición |
+| `OLLAMA_URL` | `http://localhost:11434` | Dónde corre Ollama |
+| `OLLAMA_MODELO` | `qwen3:8b` | Modelo local |
+| `AZURE_AI_ENDPOINT` | — | `https://<recurso>.services.ai.azure.com/openai/v1` (sin `/chat/completions`) |
+| `AZURE_AI_DEPLOYMENT` | — | Nombre del despliegue en Foundry |
+| `AZURE_AI_API_KEY` | — | Clave del recurso de Foundry |
 
-Si Ollama no está corriendo, la pestaña Variaciones sigue funcionando
-normal — cada observación simplemente muestra un aviso de que no se pudo
-generar, en vez de romper el resto de la página.
+**`IA_TIMEOUT` e `IA_LOTE` dependen del hardware, no del código.** El
+frontend consulta `GET /ia/config` y usa el `lote` que diga el servidor:
+contra un endpoint en la nube, 5 en paralelo van bien; contra un Ollama
+en CPU, esas 5 se pelean los mismos núcleos y conviene bajar el lote y
+subir el timeout.
+
+Si el proveedor no responde, la pestaña Variaciones sigue funcionando —
+cada observación muestra un aviso y un botón "Reintentar", en vez de
+romper el resto de la página.
+
+### Los dos servidores en uso
+
+| | **oficina** (local, sin GPU) | **azure** (VM en la nube) |
+|---|---|---|
+| IA | Ollama en Docker, CPU | Azure AI Foundry, serverless |
+| `IA_PROVEEDOR` | `ollama` | `azure_foundry` |
+| `OLLAMA_MODELO` | `qwen3:4b` (los 8b no caben con 7 GiB de RAM) | — |
+| `IA_LOTE` | `2` | `5` |
+| `IA_TIMEOUT` | `240` | `60` |
+| Acceso público | Tailscale Funnel (`*.ts.net`) | DNS de Azure (`*.cloudapp.azure.com`) |
+
+Ambos corren el mismo código y el mismo esquema; lo único que cambia son
+esas variables de entorno en el `systemd`. **oficina existe como respaldo
+del avance de la capa de IA**: los créditos de Azure se agotan y el
+análisis guardado no puede depender de una sola máquina.
 
 ## Despliegue en un servidor Linux (producción)
 

@@ -30,6 +30,14 @@ AZURE_AI_ENDPOINT = os.getenv("AZURE_AI_ENDPOINT")
 AZURE_AI_DEPLOYMENT = os.getenv("AZURE_AI_DEPLOYMENT")
 AZURE_AI_API_KEY = os.getenv("AZURE_AI_API_KEY")
 
+# Cuánto esperar por una observación, y cuántas pedir a la vez. Dependen
+# del hardware, no del código: en un endpoint en la nube caben 5 en
+# paralelo sin problema, pero en un servidor sin GPU esas 5 se pelean los
+# mismos núcleos y todas se pasan del timeout. Por eso son variables de
+# entorno y el frontend las consulta en vez de traerlas fijas.
+IA_TIMEOUT = int(os.getenv("IA_TIMEOUT", "60"))
+IA_LOTE = int(os.getenv("IA_LOTE", "5"))
+
 PROMPT_SISTEMA = (
     "Eres un asistente de auditoría. Se te dan cifras YA CALCULADAS sobre "
     "una cuenta contable, en un JSON. Tu única tarea es redactar una "
@@ -72,6 +80,22 @@ def modelo_actual() -> str:
     return f"ollama:{MODELO}"
 
 
+def config() -> dict:
+    """Lo que el frontend necesita saber del proveedor activo. `lote` es
+    cuántas observaciones pedir por petición: lo decide el servidor, que
+    es el que sabe si detrás hay una GPU en la nube o 12 núcleos de CPU."""
+    return {
+        "proveedor": IA_PROVEEDOR,
+        "modelo": modelo_actual(),
+        "lote": IA_LOTE,
+        "timeout": IA_TIMEOUT,
+        "disponible": (
+            bool(AZURE_AI_ENDPOINT and AZURE_AI_DEPLOYMENT and AZURE_AI_API_KEY)
+            if IA_PROVEEDOR == "azure_foundry" else True
+        ),
+    }
+
+
 def _prompt(entrada: dict, instruccion: str | None = None,
             previo: str | None = None) -> str:
     partes = [
@@ -94,7 +118,7 @@ def _prompt(entrada: dict, instruccion: str | None = None,
     return "\n\n".join(partes)
 
 
-def redactar_observacion(entrada: dict, timeout: int = 60,
+def redactar_observacion(entrada: dict, timeout: int | None = None,
                          instruccion: str | None = None,
                          previo: str | None = None) -> dict:
     """Llama al modelo (Ollama o Azure AI Foundry, según IA_PROVEEDOR) y
@@ -106,12 +130,13 @@ def redactar_observacion(entrada: dict, timeout: int = 60,
     Nunca lanza por errores del modelo/red: si no responde, devuelve un
     texto de aviso en vez de tumbar el flujo de variaciones.
     """
+    espera = timeout if timeout is not None else IA_TIMEOUT
     try:
         prompt = _prompt(entrada, instruccion, previo)
         if IA_PROVEEDOR == "azure_foundry":
-            texto = _generar_foundry(prompt, timeout)
+            texto = _generar_foundry(prompt, espera)
         else:
-            texto = _generar_ollama(prompt, timeout)
+            texto = _generar_ollama(prompt, espera)
     except Exception as exc:
         return {"texto": f"No se pudo generar la observación: {exc}",
                 "verificado": False, "cifras_no_verificadas": [], "error": True}

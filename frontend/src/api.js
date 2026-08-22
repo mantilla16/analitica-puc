@@ -49,6 +49,7 @@ export const api = {
   balance: (id, params) => pedir(`/encargos/${id}/balance?${params}`),
   variaciones: (id, fase) =>
     pedir(`/encargos/${id}/variaciones${fase ? `?fase=${fase}` : ""}`),
+  iaConfig: () => pedir("/ia/config"),
   observacionesGuardadas: (id, fase) =>
     pedir(`/encargos/${id}/variaciones/${fase}/observaciones/guardadas`),
   observacionesLote: (id, fase, codigos) =>

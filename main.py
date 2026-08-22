@@ -319,6 +319,15 @@ def detalle_cuenta(encargo_id: str, codigo: str) -> dict:
     return A.detalle_cuenta(encargo_id, codigo)
 
 
+@app.get("/ia/config")
+def ia_config() -> dict:
+    """Proveedor y modelo activos, y de cuántas en cuántas conviene pedir
+    las observaciones en ESTE servidor -- no es lo mismo un endpoint en la
+    nube que 12 núcleos de CPU."""
+    import ia
+    return ia.config()
+
+
 @app.get("/encargos/{encargo_id}/variaciones/{fase}/observaciones/guardadas")
 def observaciones_guardadas(encargo_id: str, fase: str) -> list[dict]:
     """Lo que la IA ya redactó para esta fase, tal como quedó guardado.
