@@ -8,6 +8,12 @@ frontend/dist/
 # Datos de clientes de auditoría -- NUNCA va al repo
 archivos/
 
+# Dumps de la base: traen los datos reales del cliente, no solo estructura.
+# (db/schema.sql sí va: es estructura + catálogo, sin datos de clientes.)
+*.dump
+*.sql.gz
+*.backup
+
 # Respaldos manuales locales -- git es el respaldo real ahora
 BK/
 filesV3/
