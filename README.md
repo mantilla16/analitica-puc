@@ -101,6 +101,7 @@ Dos proveedores, elegidos por `IA_PROVEEDOR`:
 | `IA_TIMEOUT` | `60` | Segundos de espera por observación |
 | `IA_LOTE` | `5` | Cuántas observaciones se piden por petición |
 | `IA_AUTO` | `1` | Si al abrir Variaciones se generan solas las que faltan (`0` = solo a pedido) |
+| `IA_MAX_TOKENS` | `700` | Tope de la respuesta; acota el peor caso de tiempo |
 | `OLLAMA_URL` | `http://localhost:11434` | Dónde corre Ollama |
 | `OLLAMA_MODELO` | `qwen3:8b` | Modelo local |
 | `AZURE_AI_ENDPOINT` | — | `https://<recurso>.services.ai.azure.com/openai/v1` (sin `/chat/completions`) |

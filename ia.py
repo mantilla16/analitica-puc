@@ -44,6 +44,13 @@ IA_LOTE = int(os.getenv("IA_LOTE", "5"))
 # es mejor pintar lo ya guardado y generar solo lo que él pida.
 IA_AUTO = os.getenv("IA_AUTO", "1") not in ("0", "false", "False", "no")
 
+# Tope de tokens de la respuesta. Es el freno estructural contra que el
+# modelo se extienda: una observación de 3 a 6 frases ronda los 350
+# tokens, así que con 700 hay margen de sobra y a la vez el peor caso
+# queda acotado -- sin esto, un modelo que razona en voz alta puede
+# gastar miles de tokens antes de escribir la primera frase útil.
+IA_MAX_TOKENS = int(os.getenv("IA_MAX_TOKENS", "700"))
+
 PROMPT_SISTEMA = (
     "Eres un asistente de auditoría. Se te dan cifras YA CALCULADAS sobre "
     "una cuenta contable, en un JSON. Tu única tarea es redactar una "
@@ -96,6 +103,7 @@ def config() -> dict:
         "lote": IA_LOTE,
         "timeout": IA_TIMEOUT,
         "auto": IA_AUTO,
+        "max_tokens": IA_MAX_TOKENS,
         "disponible": (
             bool(AZURE_AI_ENDPOINT and AZURE_AI_DEPLOYMENT and AZURE_AI_API_KEY)
             if IA_PROVEEDOR == "azure_foundry" else True
@@ -174,6 +182,7 @@ def _generar_foundry(prompt: str, timeout: int) -> str:
         model=AZURE_AI_DEPLOYMENT,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.2,
+        max_tokens=IA_MAX_TOKENS,
     )
     return _quitar_pensamiento(r.choices[0].message.content)
 
@@ -181,8 +190,8 @@ def _generar_foundry(prompt: str, timeout: int) -> str:
 def _generar_ollama(prompt: str, timeout: int) -> str:
     payload = json.dumps({
         "model": MODELO, "prompt": prompt + " /no_think", "stream": False,
-        "think": False,   # ignorado sin daño por modelos que no soportan pensar
-        "options": {"temperature": 0.2},
+        "think": False,   # medido: NO lo respetan todos los modelos/versiones
+        "options": {"temperature": 0.2, "num_predict": IA_MAX_TOKENS},
     }).encode("utf-8")
     req = urllib.request.Request(
         f"{OLLAMA_URL}/api/generate", data=payload,
