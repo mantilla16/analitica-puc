@@ -38,6 +38,12 @@ AZURE_AI_API_KEY = os.getenv("AZURE_AI_API_KEY")
 IA_TIMEOUT = int(os.getenv("IA_TIMEOUT", "60"))
 IA_LOTE = int(os.getenv("IA_LOTE", "5"))
 
+# Si al abrir Variaciones se generan solas las que faltan. Contra un
+# endpoint en la nube conviene; contra un modelo en CPU no, porque el
+# auditor queda esperando minutos cada vez que entra a la pestaña -- ahí
+# es mejor pintar lo ya guardado y generar solo lo que él pida.
+IA_AUTO = os.getenv("IA_AUTO", "1") not in ("0", "false", "False", "no")
+
 PROMPT_SISTEMA = (
     "Eres un asistente de auditoría. Se te dan cifras YA CALCULADAS sobre "
     "una cuenta contable, en un JSON. Tu única tarea es redactar una "
@@ -89,6 +95,7 @@ def config() -> dict:
         "modelo": modelo_actual(),
         "lote": IA_LOTE,
         "timeout": IA_TIMEOUT,
+        "auto": IA_AUTO,
         "disponible": (
             bool(AZURE_AI_ENDPOINT and AZURE_AI_DEPLOYMENT and AZURE_AI_API_KEY)
             if IA_PROVEEDOR == "azure_foundry" else True

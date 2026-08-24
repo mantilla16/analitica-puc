@@ -70,13 +70,15 @@ export default function Variaciones({ encargoId }) {
     let vivo = true;
 
     (async () => {
-      // El tamaño del lote lo decide el servidor: 5 contra un endpoint en
-      // la nube, menos contra un Ollama en CPU.
+      // El tamaño del lote y si se genera solo lo decide el servidor: no
+      // es lo mismo un endpoint en la nube que un modelo en CPU.
       let tamLote = 5;
+      let auto = true;
       try {
         const cfg = await api.iaConfig();
         if (cfg?.lote) tamLote = cfg.lote;
-      } catch { /* sin config, se usa el valor por defecto */ }
+        if (cfg?.auto === false) auto = false;
+      } catch { /* sin config, se usan los valores por defecto */ }
       if (!vivo) return;
 
       let guardadas = {};
@@ -86,6 +88,8 @@ export default function Variaciones({ encargoId }) {
       } catch { /* sin guardadas, se generan todas */ }
       if (!vivo) return;
       setObs(guardadas);
+
+      if (!auto) return;   // se generan a pedido, con el botón de cada fila
 
       const faltan = d.filas
         .filter((f) => f.significativa && !guardadas[f.cuenta])
@@ -300,13 +304,15 @@ export default function Variaciones({ encargoId }) {
           El min-w deja que en pantallas angostas sí se pueda desplazar. */}
       <div className="overflow-x-auto border border-regla bg-papel-alto">
         <table className="w-full min-w-[900px] table-fixed text-sm">
+          {/* La columna Variación va en cuerpo más grande que las otras
+              cifras, así que necesita más aire o se monta sobre el %. */}
           <colgroup>
             <col className="w-[8%]" />
-            <col className="w-[21%]" />
+            <col className="w-[18%]" />
             <col className="w-[14%]" />
             <col className="w-[14%]" />
-            <col className="w-[14%]" />
-            <col className="w-[7%]" />
+            <col className="w-[16%]" />
+            <col className="w-[8%]" />
             <col className="w-[12%]" />
             <col className="w-[10%]" />
           </colgroup>

@@ -100,6 +100,7 @@ Dos proveedores, elegidos por `IA_PROVEEDOR`:
 | `IA_PROVEEDOR` | `ollama` | `ollama` \| `azure_foundry` |
 | `IA_TIMEOUT` | `60` | Segundos de espera por observación |
 | `IA_LOTE` | `5` | Cuántas observaciones se piden por petición |
+| `IA_AUTO` | `1` | Si al abrir Variaciones se generan solas las que faltan (`0` = solo a pedido) |
 | `OLLAMA_URL` | `http://localhost:11434` | Dónde corre Ollama |
 | `OLLAMA_MODELO` | `qwen3:8b` | Modelo local |
 | `AZURE_AI_ENDPOINT` | — | `https://<recurso>.services.ai.azure.com/openai/v1` (sin `/chat/completions`) |
@@ -123,8 +124,9 @@ romper el resto de la página.
 | IA | Ollama en Docker, CPU | Azure AI Foundry, serverless |
 | `IA_PROVEEDOR` | `ollama` | `azure_foundry` |
 | `OLLAMA_MODELO` | `qwen3:4b` (los 8b no caben con 7 GiB de RAM) | — |
-| `IA_LOTE` | `2` | `5` |
-| `IA_TIMEOUT` | `240` | `60` |
+| `IA_LOTE` | `1` | `5` |
+| `IA_TIMEOUT` | `600` | `60` |
+| `IA_AUTO` | `0` (a pedido) | `1` (automático) |
 | Acceso público | Tailscale Funnel (`*.ts.net`) | DNS de Azure (`*.cloudapp.azure.com`) |
 
 Ambos corren el mismo código y el mismo esquema; lo único que cambia son
