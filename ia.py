@@ -81,7 +81,10 @@ PROMPT_SISTEMA = (
     "  miles, coma decimal) -- cópialos exactamente así, no los conviertas "
     "  a notación de punto decimal. Menciona 'COP' o 'pesos colombianos' "
     "  al menos una vez en la observación.\n"
-    "- Responde en español, en prosa corrida, sin viñetas ni markdown."
+    "- Responde en español, en prosa corrida, sin viñetas ni markdown.\n"
+    "- Empieza directamente con la observación. Nada de preámbulos tipo "
+    "  'Claro, aquí tienes' ni de repetir lo que se te pidió: el texto se "
+    "  muestra tal cual dentro de un papel de trabajo."
 )
 
 
