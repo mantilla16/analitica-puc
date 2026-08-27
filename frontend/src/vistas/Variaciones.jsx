@@ -211,7 +211,9 @@ export default function Variaciones({ encargoId }) {
         <label className="ml-auto flex items-center gap-2 text-sm">
           <input type="checkbox" checked={soloSig} disabled={!d.aplica}
                  onChange={(e) => setSoloSig(e.target.checked)} />
-          Solo las que superan el umbral
+          {/* Filtra por `significativa`, que es cualquiera de los cinco
+              motivos -- no solo el de monto contra la materialidad. */}
+          Solo las marcadas para revisión
         </label>
         <button onClick={() => verHistorial(null)}
                 className="rotulo text-tinta-suave hover:text-tinta">
@@ -332,7 +334,7 @@ export default function Variaciones({ encargoId }) {
             {filas.length === 0 && (
               <tr>
                 <td colSpan={8} className="px-3 py-10 text-center text-tinta-suave">
-                  Ninguna cuenta supera el umbral. Quite el filtro para ver todas.
+                  Ninguna cuenta quedó marcada para revisión. Quite el filtro para verlas todas.
                 </td>
               </tr>
             )}
