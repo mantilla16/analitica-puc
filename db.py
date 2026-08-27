@@ -587,12 +587,14 @@ def usuarios() -> list[dict]:
 
 
 def usuarios_activos() -> list[dict]:
-    """Solo usuario y nombre: lo mínimo para poblar un selector. No pasa
-    por el filtro de ADMIN porque cualquier auditor necesita poder elegir
-    a un colega como responsable de un encargo."""
+    """Auditores activos: los que pueden ser responsables de un encargo.
+    Se excluye ADMIN porque es un rol de administración del sistema, no
+    alguien a quien se le asigne un encargo. Devuelve solo usuario y
+    nombre, y no exige rol ADMIN para consultarse: cualquier auditor
+    necesita poder elegir a un colega."""
     return varios(
         """SELECT usuario, nombre FROM core.usuario
-           WHERE activo ORDER BY nombre"""
+           WHERE activo AND rol = 'AUDITOR' ORDER BY nombre"""
     )
 
 

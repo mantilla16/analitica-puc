@@ -8,15 +8,26 @@ export default function Encargos({ yo, onAbrir }) {
   const [error, setError] = useState(null);
   const [auditores, setAuditores] = useState([]);
   const [form, setForm] = useState({
-    nit: "", razon_social: "", fecha_corte: "",
-    responsable: yo?.usuario ?? "",   // por defecto, quien está trabajando
+    nit: "", razon_social: "", fecha_corte: "", responsable: "",
   });
 
   useEffect(() => { refrescar(); }, []);
 
+  /* El responsable por defecto es quien está trabajando, pero la lista
+     solo trae auditores: si quien entró es ADMIN no aparece en ella, y
+     dejar su usuario en el formulario mandaría un valor que el selector
+     no muestra. En ese caso se toma el primero de la lista. */
   useEffect(() => {
-    api.auditores().then(setAuditores).catch(() => {});
-  }, []);
+    api.auditores().then((lista) => {
+      setAuditores(lista);
+      setForm((f) => ({
+        ...f,
+        responsable: lista.some((a) => a.usuario === yo?.usuario)
+          ? yo.usuario
+          : (lista[0]?.usuario ?? ""),
+      }));
+    }).catch(() => {});
+  }, [yo?.usuario]);
 
   function refrescar() {
     api.encargos().then(setLista).catch((e) => setError(e.message));
@@ -142,7 +153,7 @@ export default function Encargos({ yo, onAbrir }) {
               <select {...campo("responsable")} required
                       className={`${campo("responsable").className} mt-1`}>
                 {auditores.length === 0 && (
-                  <option value="">Cargando…</option>
+                  <option value="">No hay auditores registrados</option>
                 )}
                 {auditores.map((a) => (
                   <option key={a.usuario} value={a.usuario}>
