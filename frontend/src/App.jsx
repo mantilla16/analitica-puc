@@ -61,7 +61,7 @@ export default function App() {
         ? <Usuarios yo={yo} onVolver={() => setVista("encargos")} />
         : encargoId
           ? <Encargo encargoId={encargoId} onVolver={() => setEncargoId(null)} />
-          : <Encargos onAbrir={setEncargoId} />}
+          : <Encargos yo={yo} onAbrir={setEncargoId} />}
     </>
   );
 }

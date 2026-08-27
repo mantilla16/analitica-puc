@@ -586,6 +586,16 @@ def usuarios() -> list[dict]:
     )
 
 
+def usuarios_activos() -> list[dict]:
+    """Solo usuario y nombre: lo mínimo para poblar un selector. No pasa
+    por el filtro de ADMIN porque cualquier auditor necesita poder elegir
+    a un colega como responsable de un encargo."""
+    return varios(
+        """SELECT usuario, nombre FROM core.usuario
+           WHERE activo ORDER BY nombre"""
+    )
+
+
 def hay_usuarios() -> bool:
     return (uno("SELECT count(*) AS n FROM core.usuario") or {}).get("n", 0) > 0
 

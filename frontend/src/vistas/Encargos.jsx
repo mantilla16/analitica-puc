@@ -2,15 +2,21 @@ import { useEffect, useState } from "react";
 import { api, fecha } from "../api";
 import { Aviso, Boton } from "../comp/Piezas";
 
-export default function Encargos({ onAbrir }) {
+export default function Encargos({ yo, onAbrir }) {
   const [lista, setLista] = useState([]);
   const [creando, setCreando] = useState(false);
   const [error, setError] = useState(null);
+  const [auditores, setAuditores] = useState([]);
   const [form, setForm] = useState({
-    nit: "", razon_social: "", fecha_corte: "", responsable: "",
+    nit: "", razon_social: "", fecha_corte: "",
+    responsable: yo?.usuario ?? "",   // por defecto, quien está trabajando
   });
 
   useEffect(() => { refrescar(); }, []);
+
+  useEffect(() => {
+    api.auditores().then(setAuditores).catch(() => {});
+  }, []);
 
   function refrescar() {
     api.encargos().then(setLista).catch((e) => setError(e.message));
@@ -133,7 +139,17 @@ export default function Encargos({ onAbrir }) {
 
             <label className="block">
               <span className="rotulo">Responsable</span>
-              <input {...campo("responsable")} className={`${campo("responsable").className} mt-1`} />
+              <select {...campo("responsable")} required
+                      className={`${campo("responsable").className} mt-1`}>
+                {auditores.length === 0 && (
+                  <option value="">Cargando…</option>
+                )}
+                {auditores.map((a) => (
+                  <option key={a.usuario} value={a.usuario}>
+                    {a.nombre}{a.usuario === yo?.usuario ? " (usted)" : ""}
+                  </option>
+                ))}
+              </select>
             </label>
           </div>
 

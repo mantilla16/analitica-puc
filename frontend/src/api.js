@@ -35,6 +35,7 @@ export const api = {
   cambiarMiClave: (clave_actual, clave) =>
     pedir("/auth/clave", json("PUT", { clave_actual, clave })),
 
+  auditores: () => pedir("/usuarios/activos"),
   usuarios: () => pedir("/usuarios"),
   crearUsuario: (d) => pedir("/usuarios", json("POST", d)),
   editarUsuario: (id, d) => pedir(`/usuarios/${id}`, json("PUT", d)),

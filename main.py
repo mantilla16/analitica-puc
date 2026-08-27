@@ -187,6 +187,13 @@ def cambiar_mi_clave(c: ClaveNueva, request: Request) -> dict:
 # ADMINISTRACIÓN DE USUARIOS
 # =====================================================================
 
+@app.get("/usuarios/activos")
+def usuarios_activos() -> list[dict]:
+    """Usuario y nombre de quienes pueden ser responsables de un encargo.
+    Disponible para cualquier sesión: no expone rol, correo ni estado."""
+    return db.usuarios_activos()
+
+
 @app.get("/usuarios")
 def listar_usuarios(request: Request) -> list[dict]:
     _exigir_admin(request)
