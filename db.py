@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 import os
 from contextlib import contextmanager
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Iterable, Iterator
 
@@ -565,6 +565,87 @@ def hallazgos(carga_id: str) -> list[dict]:
         "SELECT * FROM core.hallazgo WHERE carga_id=%s ORDER BY detectado_en",
         (carga_id,),
     )
+
+
+# =====================================================================
+# USUARIOS Y SESIONES
+# =====================================================================
+
+def usuario_por_nombre(usuario: str) -> dict | None:
+    return uno("SELECT * FROM core.usuario WHERE usuario=%s", (usuario,))
+
+
+def usuario_por_id(usuario_id: str) -> dict | None:
+    return uno("SELECT * FROM core.usuario WHERE id=%s", (usuario_id,))
+
+
+def usuarios() -> list[dict]:
+    return varios(
+        """SELECT id, usuario, nombre, correo, rol, activo, creado_en, ultimo_acceso
+           FROM core.usuario ORDER BY activo DESC, usuario"""
+    )
+
+
+def hay_usuarios() -> bool:
+    return (uno("SELECT count(*) AS n FROM core.usuario") or {}).get("n", 0) > 0
+
+
+def crear_usuario(usuario: str, nombre: str, correo: str | None,
+                  clave_hash: str, rol: str) -> dict:
+    return uno(
+        """INSERT INTO core.usuario (usuario, nombre, correo, clave_hash, rol)
+           VALUES (%s,%s,%s,%s,%s)
+           RETURNING id, usuario, nombre, correo, rol, activo, creado_en""",
+        (usuario, nombre, correo, clave_hash, rol),
+    )
+
+
+def actualizar_usuario(usuario_id: str, **campos: Any) -> dict | None:
+    if not campos:
+        return usuario_por_id(usuario_id)
+    sets = ", ".join(f"{k}=%s" for k in campos)
+    return uno(
+        f"""UPDATE core.usuario SET {sets} WHERE id=%s
+            RETURNING id, usuario, nombre, correo, rol, activo, creado_en""",
+        (*campos.values(), usuario_id),
+    )
+
+
+def crear_sesion(token_hash: str, usuario_id: str, expira_en: datetime,
+                 agente: str | None) -> None:
+    with conn() as c:
+        c.execute(
+            """INSERT INTO core.sesion (token_hash, usuario_id, expira_en, agente)
+               VALUES (%s,%s,%s,%s)""",
+            (token_hash, usuario_id, expira_en, agente),
+        )
+        c.execute("UPDATE core.usuario SET ultimo_acceso=now() WHERE id=%s",
+                  (usuario_id,))
+        # Limpieza oportunista: sin esto la tabla crece indefinidamente
+        # con sesiones muertas, y no hay proceso programado que lo haga.
+        c.execute("DELETE FROM core.sesion WHERE expira_en < now()")
+        c.commit()
+
+
+def usuario_de_sesion(token_hash: str) -> dict | None:
+    """El usuario dueño de una sesión viva. Un usuario desactivado deja
+    de entrar de inmediato, aunque su sesión siga vigente."""
+    return uno(
+        """SELECT u.id, u.usuario, u.nombre, u.correo, u.rol, u.activo
+           FROM core.sesion s JOIN core.usuario u ON u.id = s.usuario_id
+           WHERE s.token_hash=%s AND s.expira_en > now() AND u.activo""",
+        (token_hash,),
+    )
+
+
+def borrar_sesion(token_hash: str) -> None:
+    ejecutar("DELETE FROM core.sesion WHERE token_hash=%s", (token_hash,))
+
+
+def borrar_sesiones_de(usuario_id: str) -> None:
+    """Al cambiar la contraseña o desactivar a alguien, sus sesiones
+    abiertas dejan de servir."""
+    ejecutar("DELETE FROM core.sesion WHERE usuario_id=%s", (usuario_id,))
 
 
 # =====================================================================

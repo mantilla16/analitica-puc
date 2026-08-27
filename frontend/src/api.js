@@ -1,11 +1,18 @@
 const BASE = import.meta.env.VITE_API ?? "/api";
 
+/** Se avisa cuando el servidor responde 401 para que App vuelva al login:
+ *  la sesión pudo vencer con la pestaña abierta, y sin esto la pantalla
+ *  se quedaría mostrando errores sueltos sin explicar por qué. */
+let alExpirar = () => {};
+export const cuandoExpireSesion = (fn) => { alExpirar = fn; };
+
 async function pedir(ruta, opciones = {}) {
-  const r = await fetch(BASE + ruta, opciones);
+  const r = await fetch(BASE + ruta, { credentials: "same-origin", ...opciones });
   const texto = await r.text();
   let cuerpo = null;
   try { cuerpo = texto ? JSON.parse(texto) : null; } catch { cuerpo = texto; }
   if (!r.ok) {
+    if (r.status === 401) alExpirar();
     const e = new Error(cuerpo?.detail ? JSON.stringify(cuerpo.detail) : r.statusText);
     e.estado = r.status;
     e.detalle = cuerpo?.detail ?? cuerpo;
@@ -21,6 +28,18 @@ const json = (metodo, cuerpo) => ({
 });
 
 export const api = {
+  // ------------------------------------------------------------ sesión
+  login: (usuario, clave) => pedir("/auth/login", json("POST", { usuario, clave })),
+  logout: () => pedir("/auth/logout", { method: "POST" }),
+  yo: () => pedir("/auth/yo"),
+  cambiarMiClave: (clave_actual, clave) =>
+    pedir("/auth/clave", json("PUT", { clave_actual, clave })),
+
+  usuarios: () => pedir("/usuarios"),
+  crearUsuario: (d) => pedir("/usuarios", json("POST", d)),
+  editarUsuario: (id, d) => pedir(`/usuarios/${id}`, json("PUT", d)),
+  reiniciarClave: (id, clave) => pedir(`/usuarios/${id}/clave`, json("PUT", { clave })),
+
   encargos: () => pedir("/encargos"),
   encargo: (id) => pedir(`/encargos/${id}`),
   crearEncargo: (d) => pedir("/encargos", json("POST", d)),

@@ -45,7 +45,7 @@ export default function Encargo({ encargoId, onVolver }) {
       fd.append("archivo", archivo);
       fd.append("periodo_ini", p.ini);
       fd.append("periodo_fin", p.fin);
-      fd.append("usuario", enc.responsable ?? "");
+      // Quién sube el archivo lo toma el backend de la sesión, no de aquí.
       const r = await api.subir(encargoId, fd);
       setCarga(r);
       setActivo(tipo);

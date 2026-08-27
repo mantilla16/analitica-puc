@@ -8,16 +8,20 @@ La base solo tiene tablas. Toda la lógica está en reglas.py y servicios.py.
 """
 from __future__ import annotations
 
+import os
 import shutil
 import tempfile
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import (BackgroundTasks, FastAPI, File, Form, HTTPException,
+                     Request, Response, UploadFile)
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+import auth
 import db
 import excel as X
 import servicios as S
@@ -26,11 +30,20 @@ import analisis as A
 ALMACEN = Path("./archivos")
 ALMACEN.mkdir(exist_ok=True)
 
+COOKIE = "sesion"
+SESION_HORAS = int(os.getenv("SESION_HORAS", "12"))
+# Marcar la cookie como Secure impide que viaje por HTTP plano. Queda en
+# 0 por defecto porque azure sirve por HTTP sin certificado y activarlo
+# ahí dejaría a todo el mundo sin poder entrar. Donde haya HTTPS (el
+# funnel de Tailscale, o certbot) debe ponerse en 1.
+SESION_SEGURA = os.getenv("SESION_SEGURA", "0") in ("1", "true", "True", "si")
+
 app = FastAPI(title="Auditoría PUC — Cargables", version="0.2")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -44,6 +57,195 @@ def _abrir() -> None:
 @app.on_event("shutdown")
 def _cerrar() -> None:
     db.cerrar()
+
+
+# =====================================================================
+# SESIÓN
+# =====================================================================
+
+# Lo único accesible sin sesión. Todo lo demás exige haber entrado.
+PUBLICAS = {"/auth/login", "/auth/estado"}
+
+
+@app.middleware("http")
+async def exigir_sesion(request: Request, call_next):
+    """Puerta única: en vez de proteger ruta por ruta -- donde olvidar un
+    decorador deja un hueco silencioso -- se exige sesión para todo y se
+    listan las excepciones."""
+    ruta = request.url.path
+    if request.method == "OPTIONS" or ruta in PUBLICAS:
+        return await call_next(request)
+
+    token = request.cookies.get(COOKIE)
+    u = db.usuario_de_sesion(auth.hash_token(token)) if token else None
+    if not u:
+        return JSONResponse({"detail": "No autenticado"}, status_code=401)
+
+    request.state.usuario = u
+    return await call_next(request)
+
+
+def _yo(request: Request) -> dict:
+    return request.state.usuario
+
+
+def _quien(request: Request) -> str:
+    """Con quién se firma lo que se guarda. Sale de la sesión, no de un
+    parámetro que el cliente pueda escribir a su antojo."""
+    return _yo(request)["usuario"]
+
+
+def _exigir_admin(request: Request) -> dict:
+    u = _yo(request)
+    if u["rol"] != "ADMIN":
+        raise HTTPException(403, "Requiere rol ADMIN")
+    return u
+
+
+class Credenciales(BaseModel):
+    usuario: str
+    clave: str
+
+
+class UsuarioNuevo(BaseModel):
+    usuario: str
+    nombre: str
+    correo: str | None = None
+    clave: str
+    rol: str = "AUDITOR"
+
+
+class UsuarioCambio(BaseModel):
+    nombre: str | None = None
+    correo: str | None = None
+    rol: str | None = None
+    activo: bool | None = None
+
+
+class ClaveNueva(BaseModel):
+    clave: str
+    clave_actual: str | None = None
+
+
+@app.get("/auth/estado")
+def auth_estado() -> dict:
+    """Sin sesión: sirve para que el frontend distinga 'no hay usuarios
+    todavía' de 'no has entrado'."""
+    return {"hay_usuarios": db.hay_usuarios()}
+
+
+@app.post("/auth/login")
+def login(c: Credenciales, request: Request, response: Response) -> dict:
+    u = db.usuario_por_nombre(c.usuario)
+    # Mismo mensaje para usuario inexistente, contraseña mala o cuenta
+    # desactivada: decir cuál de los tres falló ayuda a quien tantea.
+    if not u or not u["activo"] or not auth.verificar_clave(c.clave, u["clave_hash"]):
+        raise HTTPException(401, "Usuario o contraseña incorrectos")
+
+    token = auth.nuevo_token()
+    expira = datetime.now(timezone.utc) + timedelta(hours=SESION_HORAS)
+    db.crear_sesion(auth.hash_token(token), u["id"], expira,
+                    request.headers.get("user-agent"))
+
+    response.set_cookie(
+        COOKIE, token, httponly=True, samesite="lax",
+        secure=SESION_SEGURA, max_age=SESION_HORAS * 3600, path="/",
+    )
+    return {"usuario": u["usuario"], "nombre": u["nombre"], "rol": u["rol"]}
+
+
+@app.post("/auth/logout")
+def logout(request: Request, response: Response) -> dict:
+    token = request.cookies.get(COOKIE)
+    if token:
+        db.borrar_sesion(auth.hash_token(token))
+    response.delete_cookie(COOKIE, path="/")
+    return {"ok": True}
+
+
+@app.get("/auth/yo")
+def yo(request: Request) -> dict:
+    u = _yo(request)
+    return {"usuario": u["usuario"], "nombre": u["nombre"], "rol": u["rol"]}
+
+
+@app.put("/auth/clave")
+def cambiar_mi_clave(c: ClaveNueva, request: Request) -> dict:
+    """Cambio de la propia contraseña. Exige la actual: si alguien deja
+    la sesión abierta, no puede quedarse con la cuenta."""
+    u = db.usuario_por_nombre(_quien(request))
+    if not auth.verificar_clave(c.clave_actual or "", u["clave_hash"]):
+        raise HTTPException(403, "La contraseña actual no coincide")
+    problema = auth.problema_con_clave(c.clave)
+    if problema:
+        raise HTTPException(422, problema)
+    db.actualizar_usuario(u["id"], clave_hash=auth.hash_clave(c.clave))
+    return {"ok": True}
+
+
+# =====================================================================
+# ADMINISTRACIÓN DE USUARIOS
+# =====================================================================
+
+@app.get("/usuarios")
+def listar_usuarios(request: Request) -> list[dict]:
+    _exigir_admin(request)
+    return db.usuarios()
+
+
+@app.post("/usuarios")
+def crear_usuario(u: UsuarioNuevo, request: Request) -> dict:
+    _exigir_admin(request)
+    problema = auth.problema_con_clave(u.clave)
+    if problema:
+        raise HTTPException(422, problema)
+    if db.usuario_por_nombre(u.usuario):
+        raise HTTPException(409, f"El usuario {u.usuario} ya existe")
+    if u.rol not in ("ADMIN", "AUDITOR"):
+        raise HTTPException(422, "Rol debe ser ADMIN o AUDITOR")
+    return db.crear_usuario(u.usuario, u.nombre, u.correo,
+                            auth.hash_clave(u.clave), u.rol)
+
+
+@app.put("/usuarios/{usuario_id}")
+def editar_usuario(usuario_id: str, c: UsuarioCambio, request: Request) -> dict:
+    yo_ = _exigir_admin(request)
+    objetivo = db.usuario_por_id(usuario_id)
+    if not objetivo:
+        raise HTTPException(404, "Usuario no existe")
+
+    campos = {k: v for k, v in c.model_dump().items() if v is not None}
+    if campos.get("rol") not in (None, "ADMIN", "AUDITOR"):
+        raise HTTPException(422, "Rol debe ser ADMIN o AUDITOR")
+
+    # Nadie puede dejarse a sí mismo sin acceso ni quitarse el rol: sin
+    # esto, un solo clic desafortunado deja el sistema sin ningún admin y
+    # sin forma de entrar por la web a arreglarlo.
+    if str(objetivo["id"]) == str(yo_["id"]):
+        if campos.get("activo") is False:
+            raise HTTPException(409, "No puede desactivar su propia cuenta")
+        if campos.get("rol") == "AUDITOR":
+            raise HTTPException(409, "No puede quitarse a sí mismo el rol ADMIN")
+
+    r = db.actualizar_usuario(usuario_id, **campos)
+    if campos.get("activo") is False:
+        db.borrar_sesiones_de(usuario_id)
+    return r
+
+
+@app.put("/usuarios/{usuario_id}/clave")
+def reiniciar_clave(usuario_id: str, c: ClaveNueva, request: Request) -> dict:
+    """Un admin asigna contraseña nueva a otro usuario, sin conocer la
+    anterior. Cierra las sesiones de esa cuenta."""
+    _exigir_admin(request)
+    if not db.usuario_por_id(usuario_id):
+        raise HTTPException(404, "Usuario no existe")
+    problema = auth.problema_con_clave(c.clave)
+    if problema:
+        raise HTTPException(422, problema)
+    db.actualizar_usuario(usuario_id, clave_hash=auth.hash_clave(c.clave))
+    db.borrar_sesiones_de(usuario_id)
+    return {"ok": True}
 
 
 class EncargoNuevo(BaseModel):
@@ -139,9 +341,9 @@ def materialidades(encargo_id: str) -> dict:
 
 @app.put("/encargos/{encargo_id}/materialidades/{fase}")
 def guardar_materialidad(encargo_id: str, fase: str, m: MaterialidadEntrada,
-                         usuario: str | None = None) -> dict:
+                         request: Request) -> dict:
     fila = db.guardar_materialidad(encargo_id, fase, m.valor, m.porcentaje,
-                                   m.aplicar, m.nombre, usuario)
+                                   m.aplicar, m.nombre, _quien(request))
     if not fila:
         raise HTTPException(404, f"No existe materialidad de fase {fase}")
     return fila
@@ -168,7 +370,7 @@ async def subir(
     archivo: UploadFile = File(...),
     periodo_ini: date | None = Form(None),
     periodo_fin: date | None = Form(None),
-    usuario: str | None = Form(None),
+    request: Request = None,
 ) -> dict:
     enc = db.encargo(encargo_id)
     if not enc:
@@ -190,7 +392,7 @@ async def subir(
         perfil = db.perfil_vigente(enc["cliente_id"], tipo)
         c = db.crear_carga(enc["cliente_id"], encargo_id, tipo, str(destino),
                            hash_, periodo_ini, periodo_fin,
-                           perfil["id"] if perfil else None, usuario)
+                           perfil["id"] if perfil else None, _quien(request))
         db.asignar_insumo(encargo_id, tipo, c["id"])
 
         est = X.inspeccionar(destino, set(db.sinonimos(ins["naturaleza"])))
@@ -219,7 +421,7 @@ def pantalla_mapeo(carga_id: str) -> dict:
 
 @app.post("/cargas/{carga_id}/mapeo")
 def confirmar_mapeo(carga_id: str, m: MapeoConfirmado,
-                    usuario: str | None = None) -> dict:
+                    request: Request) -> dict:
     _carga(carga_id)
     mapeo = {
         "hoja": m.hoja,
@@ -227,7 +429,7 @@ def confirmar_mapeo(carga_id: str, m: MapeoConfirmado,
         "formato_fecha": m.formato_fecha,
         "ignorar_hojas": m.ignorar_hojas,
     }
-    r = S.confirmar_mapeo(carga_id, mapeo, usuario)
+    r = S.confirmar_mapeo(carga_id, mapeo, _quien(request))
     if not r["ok"]:
         raise HTTPException(422, r["problemas"])
     return r
@@ -344,22 +546,22 @@ def historia_observaciones(encargo_id: str, codigo: str | None = None) -> list[d
 
 @app.post("/encargos/{encargo_id}/variaciones/{fase}/observaciones/lote")
 def observaciones_lote(encargo_id: str, fase: str, l: LoteObservaciones,
-                       usuario: str | None = None) -> list[dict]:
+                       request: Request) -> list[dict]:
     """Varias observaciones a la vez, en paralelo -- para pedirse en
     lotes chicos (ej. 5) desde el frontend en vez de una por una o
     todas juntas en secuencia. Cada una queda guardada."""
-    return A.observaciones_lote(encargo_id, fase, l.codigos, usuario)
+    return A.observaciones_lote(encargo_id, fase, l.codigos, _quien(request))
 
 
 @app.post("/encargos/{encargo_id}/variaciones/{fase}/observacion/{codigo}")
 def observacion_cuenta(encargo_id: str, fase: str, codigo: str,
                        a: AjusteObservacion | None = None,
-                       usuario: str | None = None) -> dict:
+                       request: Request = None) -> dict:
     """Genera la observación de una cuenta y la guarda. Con `instruccion`
     reajusta la última versión según lo que indique el auditor, dejando
     una versión nueva sin borrar la anterior."""
     r = A.observacion_cuenta(encargo_id, fase, codigo,
-                             a.instruccion if a else None, usuario)
+                             a.instruccion if a else None, _quien(request))
     if r is None:
         raise HTTPException(404, "Cuenta no encontrada en las variaciones de esta fase")
     return r
@@ -378,8 +580,7 @@ def despachar() -> list[dict]:
 
 
 @app.post("/alertas/{alerta_id}/reconocer")
-def reconocer(alerta_id: int, usuario: str) -> dict:
-    from datetime import datetime
+def reconocer(alerta_id: int, request: Request) -> dict:
     db.marcar_alerta(alerta_id, estado="RECONOCIDA",
-                     reconocida_por=usuario, reconocida_en=datetime.now())
+                     reconocida_por=_quien(request), reconocida_en=datetime.now())
     return {"alerta_id": alerta_id, "estado": "RECONOCIDA"}

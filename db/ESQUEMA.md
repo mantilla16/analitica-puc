@@ -11,12 +11,13 @@ definición exacta (tipos, `NOT NULL`, índices) está en
 [`schema.sql`](schema.sql), que es la fuente de verdad — este archivo es la
 guía de lectura.
 
-Tres grupos de tablas por cómo se usan:
+Grupos de tablas por cómo se usan:
 
 1. **Catálogo** -- semilla fija, no cambia por encargo.
 2. **Operación** -- lo que crea el auditor (clientes, encargos, cargas, materialidad).
 3. **Staging y datos** -- lo que entra de los Excel y lo ya validado.
 4. **Evidencia** -- el rastro de cotejos, hallazgos y alertas.
+5. **Acceso** -- usuarios y sesiones.
 
 ---
 
@@ -285,6 +286,39 @@ que falta -- recargar la página no vuelve a pagar el análisis completo.
 
 **Nota:** esta tabla se agrega con `10_observacion_ia.sql`, que todavía
 no está incorporado en `schema.sql`.
+
+---
+
+## 5. Acceso
+
+### `core.usuario`
+Una fila por auditor. `usuario` (con el que entra), `nombre`, `correo`,
+`clave_hash`, `rol` (`ADMIN` administra usuarios, `AUDITOR` usa la
+aplicación), `activo`, `ultimo_acceso`.
+
+`clave_hash` guarda **scrypt** en formato autodescriptivo
+(`scrypt$n$r$p$sal$hash`, ver `auth.py`) -- los parámetros viajan con el
+hash, así que se pueden endurecer en el futuro sin invalidar los ya
+guardados. Se usó `hashlib` de la librería estándar en vez de
+bcrypt/passlib para no sumar una dependencia más que instalar en cada
+servidor.
+
+**Los usuarios se desactivan, nunca se borran**: `core.carga.subido_por`,
+`core.materialidad.aprobado_por` y `core.observacion_ia.creado_por`
+guardan el nombre de usuario, y ese rastro tiene que seguir siendo
+legible años después.
+
+### `core.sesion`
+Sesiones vivas. `token_hash` (PK), `usuario_id`, `expira_en`, `agente`.
+
+**Se guarda el sha256 del token, nunca el token**: quien lea la tabla no
+puede suplantar una sesión abierta. El token real solo existe en la
+cookie HttpOnly del navegador. Las sesiones vencidas se barren de forma
+oportunista al crear una nueva, porque no hay proceso programado que lo
+haga.
+
+Cambiar una contraseña o desactivar a alguien borra sus sesiones: el
+acceso se corta de inmediato, no cuando venza la cookie.
 
 ---
 

@@ -55,11 +55,16 @@ psql -h localhost -U postgres -d auditoria_puc -v ON_ERROR_STOP=1 -f db/schema.s
 `08_materialidad.sql` (raíz) ya está incorporado en `db/schema.sql` --
 queda como registro histórico, no se vuelve a correr.
 
-**`10_observacion_ia.sql` todavía NO está en el dump** y hay que aplicarlo
-después, tanto en una base nueva como en una existente:
+**`10_observacion_ia.sql` y `11_usuarios.sql` todavía NO están en el dump**
+y hay que aplicarlos después, tanto en una base nueva como en una
+existente:
 
 ```bash
 psql -h localhost -U postgres -d auditoria_puc -v ON_ERROR_STOP=1 -f 10_observacion_ia.sql
+```
+
+```bash
+psql -h localhost -U postgres -d auditoria_puc -v ON_ERROR_STOP=1 -f 11_usuarios.sql
 ```
 
 Cuando se regenere `db/schema.sql` con un `pg_dump` nuevo, esa migración
@@ -80,6 +85,30 @@ set AUDITORIA_DSN=postgresql://postgres:TU_PASSWORD@localhost:5432/auditoria_puc
 defecto `postgresql://postgres:postgres@localhost:5432/auditoria_puc` —
 sirve para desarrollo local si esa es tu contraseña, pero en cualquier otro
 entorno hay que fijarla explícitamente.
+
+### 2.b Primer usuario
+
+La aplicación exige sesión para todo. Los usuarios se administran desde la
+web, pero el primero hay que crearlo en el servidor:
+
+```bash
+python usuarios.py crear
+```
+
+Pide la contraseña de forma oculta (no se pasa como argumento, para que no
+quede en el historial del shell). El mismo script recupera el acceso si se
+pierde la contraseña del admin: `python usuarios.py clave <usuario>`.
+
+| Variable | Default | Qué es |
+|---|---|---|
+| `SESION_HORAS` | `12` | Duración de la sesión |
+| `SESION_SEGURA` | `0` | `1` marca la cookie como `Secure`. **Actívalo donde haya HTTPS** |
+
+Sobre `SESION_SEGURA`: queda en `0` por defecto porque azure sirve por
+HTTP plano y activarlo ahí dejaría a todos sin poder entrar. Pero con la
+cookie viajando sin cifrar, quien esté en la red puede capturarla y
+suplantar la sesión. Donde haya HTTPS —el funnel de Tailscale, o azure con
+`certbot`— debe ponerse en `1`.
 
 ### 3. Frontend
 

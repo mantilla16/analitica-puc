@@ -1,10 +1,67 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { api, cuandoExpireSesion } from "./api";
 import Encargos from "./vistas/Encargos";
 import Encargo from "./vistas/Encargo";
+import Login from "./vistas/Login";
+import Usuarios from "./vistas/Usuarios";
+import { Boton } from "./comp/Piezas";
 
 export default function App() {
+  const [yo, setYo] = useState(null);
+  const [verificando, setVerificando] = useState(true);
   const [encargoId, setEncargoId] = useState(null);
-  return encargoId
-    ? <Encargo encargoId={encargoId} onVolver={() => setEncargoId(null)} />
-    : <Encargos onAbrir={setEncargoId} />;
+  const [vista, setVista] = useState("encargos");
+
+  /* Al cargar se pregunta si la cookie sigue viva, en vez de asumir que
+     hay que entrar: así recargar la página no obliga a re-autenticarse. */
+  useEffect(() => {
+    api.yo()
+      .then(setYo)
+      .catch(() => setYo(null))
+      .finally(() => setVerificando(false));
+  }, []);
+
+  /* Si una sesión vence con la pestaña abierta, cualquier 401 devuelve al
+     login en vez de dejar la pantalla llenándose de errores. */
+  useEffect(() => {
+    cuandoExpireSesion(() => { setYo(null); setEncargoId(null); });
+  }, []);
+
+  async function salir() {
+    try { await api.logout(); } catch { /* la sesión igual se abandona */ }
+    setYo(null);
+    setEncargoId(null);
+    setVista("encargos");
+  }
+
+  if (verificando) return null;              // evita el parpadeo del login
+  if (!yo) return <Login onEntrar={setYo} />;
+
+  return (
+    <>
+      <div className="border-b border-regla bg-papel-alto">
+        <div className="mx-auto flex max-w-5xl items-center gap-4 px-6 py-2">
+          <span className="rotulo">{yo.nombre}</span>
+          {yo.rol === "ADMIN" && (
+            <span className="rotulo text-verde">admin</span>
+          )}
+          <div className="ml-auto flex items-center gap-4">
+            {yo.rol === "ADMIN" && vista !== "usuarios" && (
+              <button onClick={() => setVista("usuarios")}
+                      className="rotulo text-tinta-suave hover:text-tinta">
+                Usuarios
+              </button>
+            )}
+            <Boton variante="texto" onClick={salir}>Salir</Boton>
+          </div>
+        </div>
+      </div>
+
+      {vista === "usuarios"
+        ? <Usuarios yo={yo} onVolver={() => setVista("encargos")} />
+        : encargoId
+          ? <Encargo encargoId={encargoId} onVolver={() => setEncargoId(null)} />
+          : <Encargos onAbrir={setEncargoId} />}
+    </>
+  );
 }
