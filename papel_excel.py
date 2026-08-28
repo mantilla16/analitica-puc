@@ -69,9 +69,15 @@ def _hoja(wb, nombre, titulo, subtitulo=None):
     return h
 
 
-def _tabla(h, fila_ini, columnas, filas, anchos=None, formatos=None):
-    """Escribe una tabla con encabezado, congela el encabezado y deja
-    autofiltro: sin eso, una tabla de 86 cuentas es ilegible en papel."""
+def _tabla(h, fila_ini, columnas, filas, anchos=None, formatos=None,
+           principal=False):
+    """Escribe una tabla con encabezado.
+
+    `principal` marca la tabla que manda en la hoja: solo esa recibe el
+    panel congelado y el autofiltro, porque Excel admite UNO por hoja. Si
+    se fijan en cada tabla, gana la última -- y en una hoja con varias
+    tablas eso deja el panel congelado en una fila muy abajo, con lo que
+    Excel congela toda el área visible y el scroll deja de responder."""
     for j, c in enumerate(columnas, start=1):
         celda = h.cell(row=fila_ini, column=j, value=c)
         celda.font = _encabezado
@@ -92,7 +98,7 @@ def _tabla(h, fila_ini, columnas, filas, anchos=None, formatos=None):
         h.column_dimensions[get_column_letter(j)].width = a
 
     fin = fila_ini + len(filas)
-    if filas:
+    if filas and principal:
         h.auto_filter.ref = f"A{fila_ini}:{get_column_letter(len(columnas))}{fin}"
         h.freeze_panes = h.cell(row=fila_ini + 1, column=1)
     return fin + 2
@@ -169,7 +175,7 @@ def construir(p: dict) -> bytes:
           c.get("filas_leidas"), c.get("filas_promovidas"),
           c.get("estado", "SIN CARGAR"), c.get("subido_por", "")]
          for c in p["contrato_datos"]],
-        anchos=[34, 46, 34, 12, 26, 12, 14, 14, 14])
+        anchos=[34, 46, 34, 12, 26, 12, 14, 14, 14], principal=True)
 
     # el mapeo campo a campo va debajo, por insumo
     for c in p["contrato_datos"]:
@@ -192,7 +198,7 @@ def construir(p: dict) -> bytes:
                       c["detalle"]])
     fin = _tabla(h, 4,
         ["Código", "Marca", "Control", "Estado", "¿Evidencia?", "Detalle"],
-        filas, anchos=[9, 7, 34, 15, 26, 90])
+        filas, anchos=[9, 7, 34, 15, 26, 90], principal=True)
 
     # color por estado, para que el resultado se lea sin recorrer el texto
     for i, c in enumerate(p["controles_previos"] + p["gates"], start=5):
@@ -207,7 +213,7 @@ def construir(p: dict) -> bytes:
     _tabla(h, 4, ["Clase", "Nombre", "Cuentas", "Saldo"],
            [[c["clase"], c["clase_nombre"], c["cuentas"], _num(c["saldo"])]
             for c in p["cedula_sumaria"]],
-           anchos=[9, 38, 12, 22], formatos={4: PESOS})
+           anchos=[9, 38, 12, 22], formatos={4: PESOS}, principal=True)
 
     # ------------------------------------------------ 5. comparativo
     h = _hoja(wb, "Comparativo", "Comparativo por cuenta (NIA 520)",
@@ -222,7 +228,7 @@ def construir(p: dict) -> bytes:
           f["motivo"] or "", "Δ" if f["significativa"] else ""]
          for f in d["filas"]],
         anchos=[11, 40, 8, 30, 20, 20, 20, 10, 18, 8],
-        formatos={5: PESOS, 6: PESOS, 7: PESOS, 8: PORC})
+        formatos={5: PESOS, 6: PESOS, 7: PESOS, 8: PORC}, principal=True)
 
     # ---------------------------------------------------- 6. alcance
     h = _hoja(wb, "Alcance", "Alcance y selección")
@@ -265,7 +271,7 @@ def construir(p: dict) -> bytes:
            [[x["severidad"], x["tipo"], x.get("codigo_puc") or "",
              x["descripcion"], _num(x.get("monto")), x.get("fila_origen")]
             for x in p["hallazgos"]] or [["—", "Sin hallazgos registrados", "", "", None, None]],
-           anchos=[14, 22, 12, 70, 20, 12], formatos={5: PESOS})
+           anchos=[14, 22, 12, 70, 20, 12], formatos={5: PESOS}, principal=True)
 
     # ---------------------------------------------------- 8. riesgo
     h = _hoja(wb, "Riesgo", "Índice de riesgo",
@@ -273,7 +279,7 @@ def construir(p: dict) -> bytes:
     fila = _tabla(h, 4, ["Puntos", "Motivo", "Origen"],
         [[r["puntos"], r["motivo"], r["origen"]] for r in p["riesgo"]["detalle"]]
         or [[0, "Ningún control aportó puntos de riesgo", "—"]],
-        anchos=[10, 70, 26])
+        anchos=[10, 70, 26], principal=True)
     h.cell(row=fila, column=1, value="TOTAL").font = _rotulo
     h.cell(row=fila, column=2,
            value=f"{p['riesgo']['puntos']} — {p['riesgo']['nivel']}").font = Font(
@@ -286,7 +292,7 @@ def construir(p: dict) -> bytes:
                   "Contrastado contra", "¿Evidencia?"],
            [[m["marca"], m["nombre"], m["nia"], m["procedimiento"], m["contra"],
              "Sí" if m["evidencia"] else "No"] for m in p["marcas"]],
-           anchos=[8, 28, 10, 62, 76, 13])
+           anchos=[8, 28, 10, 62, 76, 13], principal=True)
 
     # ---------------------------------------------- 10. trazabilidad
     h = _hoja(wb, "Trazabilidad", "Trazabilidad",
@@ -299,7 +305,7 @@ def construir(p: dict) -> bytes:
              "Sí" if e.get("exito") else "No",
              e.get("ip") or "", str(e.get("detalle") or "")]
             for e in p["trazabilidad"]["eventos"]],
-           anchos=[20, 16, 26, 8, 18, 70])
+           anchos=[20, 16, 26, 8, 18, 70], principal=True)
 
     buffer = io.BytesIO()
     wb.save(buffer)
