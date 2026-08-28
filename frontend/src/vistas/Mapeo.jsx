@@ -72,7 +72,7 @@ export default function Mapeo({ cargaId, onListo, onCancelar }) {
           <select
             value={hoja}
             onChange={(e) => setHoja(e.target.value)}
-            className="mt-1 w-full border border-regla bg-papel-alto px-3 py-2 text-sm"
+            className="mt-1 w-full px-3 py-2 text-sm"
           >
             {datos.hojas.map((h) => (
               <option key={h.hoja} value={h.hoja}>

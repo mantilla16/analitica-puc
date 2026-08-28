@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, fecha } from "../api";
-import { Aviso, Boton } from "../comp/Piezas";
+import { Aviso, Boton, Chip } from "../comp/Piezas";
 
 export default function Encargos({ yo, onAbrir }) {
   const [lista, setLista] = useState([]);
@@ -64,8 +64,7 @@ export default function Encargos({ yo, onAbrir }) {
     value: form[k],
     onChange: (e) => setForm({ ...form, [k]: e.target.value }),
     className:
-      "w-full border border-regla bg-papel-alto px-3 py-2 text-sm " +
-      "focus:border-verde focus:outline-none",
+      "w-full px-3 py-2 text-sm",
   });
 
   return (
@@ -91,30 +90,33 @@ export default function Encargos({ yo, onAbrir }) {
           </div>
 
           {lista.length === 0 ? (
-            <div className="border border-dashed border-regla px-6 py-16 text-center">
+            <div className="rounded-[12px] border border-dashed border-regla
+                            bg-papel-alto/60 px-6 py-16 text-center">
               <p className="text-sm text-tinta-media">
                 Todavía no hay encargos. Cree el primero para empezar a cargar archivos.
               </p>
             </div>
           ) : (
-            <div className="border-t border-regla">
+            <div className="space-y-2">
               {lista.map((e) => (
-                <div
-                  key={e.id}
-                  className="flex w-full items-baseline gap-6 border-b border-regla-fina py-4 hover:bg-papel-hondo"
-                >
+                <div key={e.id}
+                     className="panel tarjeta-activa flex w-full items-center gap-5 px-5 py-4">
                   <button
                     onClick={() => onAbrir(e.id)}
-                    className="flex flex-1 items-baseline gap-6 text-left"
+                    className="flex flex-1 items-center gap-5 text-left"
                   >
-                    <span className="flex-1 font-medium">{e.razon_social}</span>
-                    <span className="cifra text-xs text-tinta-suave">{e.nit}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block font-semibold">{e.razon_social}</span>
+                      <span className="cifra block text-xs text-tinta-suave">{e.nit}</span>
+                    </span>
                     <span className="cifra text-sm">{fecha(e.fecha_corte)}</span>
-                    <span className="rotulo w-24 text-right">{e.estado}</span>
+                    <Chip tono={e.estado === "ABIERTO" ? "verde" : "gris"}>
+                      {e.estado}
+                    </Chip>
                   </button>
                   <button
                     onClick={(ev) => eliminar(ev, e)}
-                    className="rotulo text-tinta-suave hover:text-rojo"
+                    className="rotulo shrink-0 text-tinta-suave hover:text-rojo"
                     title="Borrar este encargo"
                   >
                     Borrar

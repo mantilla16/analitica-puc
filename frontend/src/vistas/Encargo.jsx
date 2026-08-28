@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, monto, entero, fecha, periodoDe, COMPARATIVO } from "../api";
-import { Aviso, Boton, Cuadre, Dato, Punteo } from "../comp/Piezas";
+import { Aviso, Boton, Chip, Cuadre, Dato, Punteo } from "../comp/Piezas";
 import Mapeo from "./Mapeo";
 import Balance from "./Balance";
 import Variaciones from "./Variaciones";
@@ -116,16 +116,12 @@ export default function Encargo({ encargoId, onVolver }) {
       {error && <div className="mt-6"><Aviso tono="error">{error}</Aviso></div>}
 
       {/* ----------------------------------------------------- pestañas */}
-      <nav className="mt-8 flex gap-1 border-b border-regla">
+      <nav className="mt-8 flex flex-wrap gap-1 rounded-full bg-papel-hondo p-1">
         {PESTANAS.map(([id, texto]) => (
           <button
             key={id}
             onClick={() => setPestana(id)}
-            className={`-mb-px border-b-2 px-4 py-2 text-sm transition-colors ${
-              pestana === id
-                ? "border-verde font-medium text-tinta"
-                : "border-transparent text-tinta-suave hover:text-tinta"
-            }`}
+            className={`pestana ${pestana === id ? "pestana-activa" : ""}`}
           >
             {texto}
           </button>
@@ -148,22 +144,22 @@ export default function Encargo({ encargoId, onVolver }) {
       {/* ------------------------------------------------------ insumos */}
       <section className="mt-8">
         <p className="rotulo mb-3">Archivos del cliente</p>
-        <div className="border-t border-regla">
+        <div className="space-y-2">
           {items.map((i) => (
             <div key={i.tipo}
-                 className="flex items-center gap-4 border-b border-regla-fina py-3.5">
-              <span className="w-5 shrink-0">
+                 className={`panel tarjeta-activa flex items-center gap-4 px-4 py-3.5 ${
+                   i.cargado ? "" : "panel-punteado"}`}>
+              <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
+                i.cargado ? "bg-verde-tenue" : "bg-papel-hondo"}`}>
                 {i.cargado ? <Punteo tam={16} /> : (
-                  <span className="block h-3.5 w-3.5 border border-regla" />
+                  <span className="block h-2 w-2 rounded-full bg-tinta-suave/40" />
                 )}
               </span>
 
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium">
+                <p className="flex items-center gap-2 text-sm font-semibold">
                   {i.insumo}
-                  {!i.requerido && (
-                    <span className="ml-2 rotulo">opcional</span>
-                  )}
+                  {!i.requerido && <Chip tono="gris">opcional</Chip>}
                 </p>
                 <p className="text-xs text-tinta-suave">{COMPARATIVO[i.tipo]}</p>
               </div>
@@ -175,15 +171,13 @@ export default function Encargo({ encargoId, onVolver }) {
               ) : null}
 
               {i.estado === "CON_HALLAZGOS" && (
-                <span className="rotulo text-ambar" title="La carga se promovió, pero quedaron descuadres sin resolver">
-                  con hallazgos
+                <span title="La carga se promovió, pero quedaron descuadres sin resolver">
+                  <Chip tono="ambar">con hallazgos</Chip>
                 </span>
               )}
-              {i.estado === "RECHAZADA" && (
-                <span className="rotulo text-rojo">rechazada</span>
-              )}
+              {i.estado === "RECHAZADA" && <Chip tono="rojo">rechazada</Chip>}
 
-              <label className="shrink-0 cursor-pointer border border-regla px-3 py-1.5 text-xs hover:bg-papel-hondo">
+              <label className="btn btn-contorno btn-chico shrink-0 cursor-pointer">
                 {i.cargado ? "Reemplazar" : "Subir"}
                 <input
                   type="file" accept=".xlsx,.xls" className="hidden" disabled={ocupado}
@@ -201,7 +195,7 @@ export default function Encargo({ encargoId, onVolver }) {
 
       {/* ------------------------------------------------------- mapeo */}
       {carga?.requiere_mapeo && !resultado && (
-        <section className="mt-10 border border-regla bg-papel-alto p-6">
+        <section className="mt-10 panel p-6">
           <Mapeo
             cargaId={carga.carga_id}
             onListo={() => { setCarga({ ...carga, requiere_mapeo: false }); procesar(carga.carga_id); }}

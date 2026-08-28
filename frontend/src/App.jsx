@@ -4,7 +4,7 @@ import Encargos from "./vistas/Encargos";
 import Encargo from "./vistas/Encargo";
 import Login from "./vistas/Login";
 import Usuarios from "./vistas/Usuarios";
-import { Boton } from "./comp/Piezas";
+import { Boton, Chip } from "./comp/Piezas";
 
 export default function App() {
   const [yo, setYo] = useState(null);
@@ -39,16 +39,19 @@ export default function App() {
 
   return (
     <>
-      <div className="border-b border-regla bg-papel-alto">
-        <div className="mx-auto flex max-w-5xl items-center gap-4 px-6 py-2">
-          <span className="rotulo">{yo.nombre}</span>
-          {yo.rol === "ADMIN" && (
-            <span className="rotulo text-verde">admin</span>
-          )}
-          <div className="ml-auto flex items-center gap-4">
+      <div className="sticky top-0 z-10 border-b border-regla
+                      bg-papel-alto/85 backdrop-blur">
+        <div className="mx-auto flex max-w-5xl items-center gap-3 px-6 py-2.5">
+          <span className="flex h-7 w-7 items-center justify-center rounded-full
+                           bg-verde text-xs font-bold text-papel-alto">
+            {yo.nombre.trim().charAt(0).toUpperCase()}
+          </span>
+          <span className="text-sm font-semibold">{yo.nombre}</span>
+          {yo.rol === "ADMIN" && <Chip tono="verde">admin</Chip>}
+          <div className="ml-auto flex items-center gap-3">
             {yo.rol === "ADMIN" && vista !== "usuarios" && (
               <button onClick={() => setVista("usuarios")}
-                      className="rotulo text-tinta-suave hover:text-tinta">
+                      className="pestana">
                 Usuarios
               </button>
             )}

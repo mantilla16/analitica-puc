@@ -2,8 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, fecha } from "../api";
 import { Aviso, Boton } from "../comp/Piezas";
 
-const CAMPO = "w-full border border-regla bg-papel-alto px-3 py-2 text-sm " +
-              "focus:border-verde focus:outline-none";
+const CAMPO = "w-full px-3 py-2 text-sm";
 
 const VACIO = { usuario: "", nombre: "", correo: "", clave: "", rol: "AUDITOR" };
 
@@ -89,7 +88,7 @@ export default function Usuarios({ yo, onVolver }) {
             <Boton onClick={() => setCreando(true)}>Nuevo usuario</Boton>
           </div>
 
-          <div className="overflow-x-auto border border-regla bg-papel-alto">
+          <div className="overflow-x-auto panel">
             <table className="w-full text-sm">
               <thead className="border-b border-regla bg-papel-hondo">
                 <tr className="rotulo text-left">

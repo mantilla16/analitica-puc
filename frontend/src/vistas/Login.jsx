@@ -27,8 +27,7 @@ export default function Login({ onEntrar }) {
     }
   }
 
-  const campo = "w-full border border-regla bg-papel-alto px-3 py-2 text-sm " +
-                "focus:border-verde focus:outline-none";
+  const campo = "w-full px-3 py-2 text-sm";
 
   return (
     <div className="mx-auto flex min-h-screen max-w-sm flex-col justify-center px-6">

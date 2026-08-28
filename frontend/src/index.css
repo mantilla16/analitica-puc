@@ -1,57 +1,224 @@
 @import "tailwindcss";
 
 /* ---------------------------------------------------------------
-   Paleta tomada del oficio: el punteo del auditor.
-   Lápiz verde = verificado. Lápiz rojo = excepción. Ámbar = revisar.
-   Papel frío, no crema: esto es un papel de trabajo, no un folleto.
+   SISTEMA DE DISEÑO
+
+   El oficio sigue mandando: lápiz verde = verificado, rojo =
+   excepción, ámbar = revisar. Lo que cambia es el tono -- superficies
+   elevadas, esquinas suaves y color más vivo -- para que se sienta una
+   herramienta actual y no una hoja impresa.
+
+   Montserrat para todo el texto. Las CIFRAS van en JetBrains Mono: es
+   la única forma de que las columnas de saldos se alineen dígito con
+   dígito, porque Montserrat no trae cifras tabulares y un balance con
+   números desalineados es ilegible.
    --------------------------------------------------------------- */
 @theme {
-  --color-papel:       #f6f7f4;
-  --color-papel-hondo: #eceee8;
+  /* Superficies -- papel frío, con profundidad */
+  --color-papel:       #eef2f6;
+  --color-papel-hondo: #e3eaf1;
   --color-papel-alto:  #ffffff;
 
-  --color-tinta:       #1b2a2f;
-  --color-tinta-media: #4a5c62;
-  --color-tinta-suave: #7d8c90;
+  /* Tinta */
+  --color-tinta:       #0f1e28;
+  --color-tinta-media: #445a67;
+  --color-tinta-suave: #7c8f9c;
 
-  --color-regla:       #d6dbd4;
-  --color-regla-fina:  #e6e9e3;
+  /* Reglas */
+  --color-regla:       #d8e2ea;
+  --color-regla-fina:  #eaf0f5;
 
-  --color-verde:       #2e6b4f;
-  --color-verde-tenue: #e4efe7;
-  --color-rojo:        #a33b30;
-  --color-rojo-tenue:  #f6e6e4;
-  --color-ambar:       #97690f;
-  --color-ambar-tenue: #f7eeda;
+  /* Semánticos -- más saturados que antes, para que el estado se lea
+     de un vistazo sin tener que buscar la etiqueta */
+  --color-verde:       #0d7a57;
+  --color-verde-vivo:  #10a473;
+  --color-verde-tenue: #ddf3ea;
+  --color-rojo:        #c0392b;
+  --color-rojo-vivo:   #e04b3a;
+  --color-rojo-tenue:  #fdeae7;
+  --color-ambar:       #b57608;
+  --color-ambar-tenue: #fdf3dc;
 
-  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --font-sans: "Montserrat", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "IBM Plex Mono", monospace;
+}
+
+:root {
+  --sombra-baja:  0 1px 2px rgb(15 30 40 / 0.05), 0 1px 3px rgb(15 30 40 / 0.04);
+  --sombra-media: 0 2px 4px rgb(15 30 40 / 0.05), 0 6px 16px rgb(15 30 40 / 0.07);
+  --sombra-alta:  0 8px 32px rgb(15 30 40 / 0.14);
+  --radio: 12px;
+  --radio-chico: 8px;
 }
 
 html {
-  background: var(--color-papel);
+  background:
+    radial-gradient(1200px 600px at 50% -10%, #f7fafc 0%, transparent 70%),
+    var(--color-papel);
+  background-attachment: fixed;
   color: var(--color-tinta);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 body { margin: 0; }
+
+h1, h2, h3 { letter-spacing: -0.02em; }
 
 /* Cifras tabulares: sin esto las columnas de saldos no se alinean */
 .cifra {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum";
+  letter-spacing: -0.01em;
 }
 
-/* Etiqueta de sección: versalita monoespaciada, no un h2 más */
+/* Etiqueta de sección. Antes era versalita monoespaciada; ahora usa la
+   misma familia del resto, con peso y espaciado, para que se sienta
+   parte del mismo lenguaje y no de una máquina de escribir. */
 .rotulo {
-  font-family: var(--font-mono);
   font-size: 0.6875rem;
-  letter-spacing: 0.14em;
+  font-weight: 600;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--color-tinta-suave);
 }
+
+/* ------------------------------------------------------------- panel */
+/* Contenedor base: tarjeta elevada en lugar de recuadro plano. */
+.panel {
+  background: var(--color-papel-alto);
+  border: 1px solid var(--color-regla);
+  border-radius: var(--radio);
+  box-shadow: var(--sombra-baja);
+  overflow: hidden;
+}
+
+.panel-plano {
+  background: var(--color-papel-alto);
+  border: 1px solid var(--color-regla);
+  border-radius: var(--radio);
+}
+
+/* `.panel` fija `border` como atajo, así que la utilidad border-dashed de
+   Tailwind no le gana; este modificador sí, por ir después. */
+.panel-punteado { border-style: dashed; background: transparent; }
+
+/* Tarjeta que responde al puntero: da a entender que se puede abrir. */
+.tarjeta-activa {
+  transition: box-shadow 0.18s ease, transform 0.18s ease,
+              border-color 0.18s ease;
+}
+.tarjeta-activa:hover {
+  box-shadow: var(--sombra-media);
+  border-color: var(--color-verde-vivo);
+  transform: translateY(-1px);
+}
+
+/* ----------------------------------------------------------- campos */
+input[type="text"], input[type="password"], input[type="number"],
+input[type="email"], input[type="date"], select, textarea {
+  border-radius: var(--radio-chico);
+  border: 1px solid var(--color-regla);
+  background: var(--color-papel-alto);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--color-verde-vivo);
+  box-shadow: 0 0 0 3px rgb(16 164 115 / 0.15);
+}
+input:disabled, select:disabled, textarea:disabled { background: var(--color-papel-hondo); }
+
+/* Casillas del tamaño y color del sistema, no las del navegador */
+input[type="checkbox"] {
+  width: 1rem; height: 1rem;
+  accent-color: var(--color-verde);
+  cursor: pointer;
+}
+
+/* ----------------------------------------------------------- botones */
+button { transition: color 0.15s ease, background-color 0.15s ease,
+                     box-shadow 0.15s ease, opacity 0.15s ease; }
+
+.btn {
+  display: inline-flex; align-items: center; gap: 0.5rem;
+  border-radius: var(--radio-chico);
+  padding: 0.55rem 1.1rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+.btn-principal {
+  background: var(--color-verde);
+  color: #fff;
+  box-shadow: var(--sombra-baja);
+}
+.btn-principal:hover:not(:disabled) {
+  background: var(--color-verde-vivo);
+  box-shadow: var(--sombra-media);
+}
+.btn-contorno {
+  background: var(--color-papel-alto);
+  border: 1px solid var(--color-regla);
+  color: var(--color-tinta);
+}
+.btn-contorno:hover:not(:disabled) {
+  border-color: var(--color-verde-vivo);
+  color: var(--color-verde);
+}
+.btn-texto {
+  color: var(--color-tinta-media);
+  padding: 0.4rem 0.2rem;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  text-decoration-thickness: 1px;
+}
+.btn-texto:hover:not(:disabled) { color: var(--color-verde); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Variante compacta. Va después de `.btn` para ganarle el padding sin
+   recurrir al modificador de importancia, que en Tailwind 4 cambió de
+   prefijo a sufijo y es fácil de escribir mal. */
+.btn-chico { padding: 0.35rem 0.8rem; font-size: 0.75rem; }
+
+/* ---------------------------------------------------------- pestañas */
+/* Píldoras en vez de subrayados: el estado activo se ve sin buscarlo. */
+.pestana {
+  border-radius: 999px;
+  padding: 0.4rem 0.9rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--color-tinta-suave);
+}
+.pestana:hover { color: var(--color-tinta); background: var(--color-papel-hondo); }
+.pestana-activa {
+  background: var(--color-tinta);
+  color: var(--color-papel-alto);
+  font-weight: 600;
+}
+.pestana-activa:hover { background: var(--color-tinta); color: var(--color-papel-alto); }
+
+/* ------------------------------------------------------------ tablas */
+.tabla thead tr { background: var(--color-papel-hondo); }
+.tabla tbody tr { transition: background-color 0.12s ease; }
+.tabla tbody tr:hover { background: var(--color-papel-hondo); }
+
+/* ------------------------------------------------------------- chips */
+.chip {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  border-radius: 999px;
+  padding: 0.15rem 0.6rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.chip-verde { background: var(--color-verde-tenue); color: var(--color-verde); }
+.chip-rojo  { background: var(--color-rojo-tenue);  color: var(--color-rojo); }
+.chip-ambar { background: var(--color-ambar-tenue); color: var(--color-ambar); }
+.chip-gris  { background: var(--color-papel-hondo); color: var(--color-tinta-media); }
 
 /* Punteo: el gesto del lápiz sobre la cifra verificada */
 @keyframes puntear {
@@ -63,6 +230,13 @@ body { margin: 0; }
   animation: puntear 0.4s ease-out forwards;
 }
 
+/* Entrada suave de los paneles laterales */
+@keyframes deslizar {
+  from { transform: translateX(16px); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+.deslizar { animation: deslizar 0.2s ease-out; }
+
 @media (prefers-reduced-motion: reduce) {
   .punteo path { animation: none; stroke-dashoffset: 0; }
   *, *::before, *::after {
@@ -72,6 +246,7 @@ body { margin: 0; }
 }
 
 *:focus-visible {
-  outline: 2px solid var(--color-verde);
+  outline: 2px solid var(--color-verde-vivo);
   outline-offset: 2px;
+  border-radius: 4px;
 }

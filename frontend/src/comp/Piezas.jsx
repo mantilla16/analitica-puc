@@ -12,19 +12,22 @@ export function Punteo({ tam = 18 }) {
 }
 
 export function Boton({ children, variante = "principal", ...props }) {
-  const base =
-    "inline-flex items-center gap-2 px-4 py-2 text-sm font-medium " +
-    "transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
   const estilos = {
-    principal: "bg-verde text-papel hover:bg-tinta",
-    contorno: "border border-regla text-tinta hover:bg-papel-hondo",
-    texto: "text-tinta-media hover:text-tinta underline underline-offset-4",
+    principal: "btn-principal",
+    contorno: "btn-contorno",
+    texto: "btn-texto",
   };
   return (
-    <button className={`${base} ${estilos[variante]}`} {...props}>
+    <button className={`btn ${estilos[variante]}`} {...props}>
       {children}
     </button>
   );
+}
+
+/** Etiqueta de estado. Un color plano dice más rápido que una palabra
+ *  suelta si algo está bien, mal o pendiente. */
+export function Chip({ tono = "gris", children }) {
+  return <span className={`chip chip-${tono}`}>{children}</span>;
 }
 
 export function Aviso({ tono = "info", titulo, children }) {
@@ -34,10 +37,26 @@ export function Aviso({ tono = "info", titulo, children }) {
     alerta: "border-ambar bg-ambar-tenue text-ambar",
     info: "border-regla bg-papel-hondo text-tinta-media",
   };
+  // El distintivo lleva color propio en vez de una opacidad sobre
+  // currentColor: menos elegante de escribir, pero no depende de cómo
+  // resuelva Tailwind los modificadores de opacidad sobre `current`.
+  const insignias = {
+    ok: "bg-verde text-papel-alto",
+    error: "bg-rojo text-papel-alto",
+    alerta: "bg-ambar text-papel-alto",
+    info: "bg-tinta-suave text-papel-alto",
+  };
+  const iconos = { ok: "✓", error: "!", alerta: "!", info: "i" };
   return (
-    <div className={`border-l-2 px-4 py-3 text-sm ${tonos[tono]}`}>
-      {titulo && <p className="font-semibold mb-0.5">{titulo}</p>}
-      <div className="leading-relaxed">{children}</div>
+    <div className={`flex gap-3 rounded-[12px] border-l-4 px-4 py-3.5 text-sm ${tonos[tono]}`}>
+      <span className={`mt-px flex h-5 w-5 shrink-0 items-center justify-center
+                        rounded-full text-xs font-bold ${insignias[tono]}`}>
+        {iconos[tono]}
+      </span>
+      <div className="min-w-0">
+        {titulo && <p className="mb-0.5 font-semibold">{titulo}</p>}
+        <div className="leading-relaxed">{children}</div>
+      </div>
     </div>
   );
 }
@@ -72,14 +91,12 @@ export function Cuadre({ cuadre }) {
               >
                 {monto(n.suma_saldo_final)}
               </span>
-              <span className="flex w-24 items-center justify-end gap-1.5">
+              <span className="flex w-28 items-center justify-end gap-1.5">
                 {ok && <Punteo />}
-                {roto && (
-                  <span className="rotulo text-rojo">descuadre</span>
-                )}
+                {roto && <Chip tono="rojo">descuadre</Chip>}
                 {!n.nivel_completo && (
-                  <span className="rotulo" title="Nivel incompleto: hay subcuentas que no bajan a este nivel">
-                    parcial
+                  <span title="Nivel incompleto: hay subcuentas que no bajan a este nivel">
+                    <Chip tono="gris">parcial</Chip>
                   </span>
                 )}
               </span>

@@ -59,10 +59,7 @@ export default function Balance({ encargoId }) {
         <span className="rotulo mr-2">Balance</span>
         {PERIODOS.map(([t, texto]) => (
           <button key={t} onClick={() => cambiarTipo(t)}
-                  className={`px-3 py-1 text-sm ${
-                    tipo === t
-                      ? "bg-tinta text-papel"
-                      : "text-tinta-suave hover:text-tinta"}`}>
+                  className={`pestana ${tipo === t ? "pestana-activa" : ""}`}>
             {texto}
           </button>
         ))}
@@ -112,12 +109,12 @@ export default function Balance({ encargoId }) {
           value={buscar}
           onChange={(e) => { setBuscar(e.target.value); setRuta([]); }}
           placeholder="Buscar código o nombre"
-          className="ml-auto w-56 border border-regla bg-papel-alto px-3 py-1.5 text-sm"
+          className="ml-auto w-56 panel px-3 py-1.5 text-sm"
         />
       </div>
 
       {/* ------------------------------------------------------ tabla */}
-      <div className="overflow-x-auto border border-regla bg-papel-alto">
+      <div className="overflow-x-auto panel">
         <table className="w-full text-sm">
           <thead className="border-b border-regla bg-papel-hondo">
             <tr className="rotulo text-left">
@@ -203,9 +200,9 @@ export default function Balance({ encargoId }) {
 
 function DetalleCuenta({ d, onCerrar }) {
   return (
-    <div className="fixed inset-0 z-20 flex justify-end bg-tinta/20" onClick={onCerrar}>
+    <div className="fixed inset-0 z-20 flex justify-end bg-tinta/25 backdrop-blur-[2px]" onClick={onCerrar}>
       <div
-        className="h-full w-full max-w-2xl overflow-y-auto border-l border-regla bg-papel p-6"
+        className="deslizar h-full w-full max-w-2xl overflow-y-auto border-l border-regla bg-papel-alto p-6 shadow-[var(--sombra-alta)]"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-6 flex items-start justify-between">

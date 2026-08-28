@@ -183,10 +183,7 @@ export default function Variaciones({ encargoId }) {
         <span className="rotulo mr-2">Analizar bajo la fase</span>
         {fases.map((f) => (
           <button key={f.fase} onClick={() => setFase(f.fase)}
-                  className={`px-3 py-1 text-sm ${
-                    d.fase === f.fase
-                      ? "bg-tinta text-papel"
-                      : "text-tinta-suave hover:text-tinta"}`}>
+                  className={`pestana ${d.fase === f.fase ? "pestana-activa" : ""}`}>
             {f.nombre}
           </button>
         ))}
@@ -253,10 +250,7 @@ export default function Variaciones({ encargoId }) {
           ["TODAS", "Todas", d.total_cuentas],
         ].map(([id, texto, n]) => (
           <button key={id} onClick={() => setSeccion(id)}
-                  className={`px-3 py-1 text-sm ${
-                    seccion === id
-                      ? "bg-tinta text-papel"
-                      : "text-tinta-suave hover:text-tinta"}`}>
+                  className={`pestana ${seccion === id ? "pestana-activa" : ""}`}>
             {texto}
             <span className="cifra ml-1.5 text-xs opacity-70">{entero(n ?? 0)}</span>
           </button>
@@ -306,7 +300,7 @@ export default function Variaciones({ encargoId }) {
       )}
 
       {d.desglose_no_seleccionado?.cerca_del_umbral.mayores.length > 0 && (
-        <div className="border border-regla bg-papel-alto p-4">
+        <div className="panel p-4">
           <p className="rotulo mb-2">Las más grandes de ese grupo</p>
           <div className="space-y-1.5 text-sm">
             {d.desglose_no_seleccionado.cerca_del_umbral.mayores.map((m) => (
@@ -335,7 +329,7 @@ export default function Variaciones({ encargoId }) {
 
       {/* -------------------------------------------------- nota de alcance */}
       {d.desglose_no_seleccionado && (
-        <div className="border border-regla bg-papel-alto p-4">
+        <div className="panel p-4">
           <p className="rotulo mb-2">Nota de alcance</p>
           <p className="text-sm leading-relaxed">{resumenAutomatico(d)}</p>
         </div>
@@ -346,7 +340,7 @@ export default function Variaciones({ encargoId }) {
           con ancho automático, el párrafo largo de la observación de IA
           ensancha toda la tabla y saca de vista las primeras columnas.
           El min-w deja que en pantallas angostas sí se pueda desplazar. */}
-      <div className="overflow-x-auto border border-regla bg-papel-alto">
+      <div className="overflow-x-auto panel">
         <table className="w-full min-w-[900px] table-fixed text-sm">
           {/* La columna Variación va en cuerpo más grande que las otras
               cifras, así que necesita más aire o se monta sobre el %. */}
@@ -519,9 +513,9 @@ function Evidencia({ e, onCerrar }) {
   const c = d?.cuadre;
 
   return (
-    <div className="fixed inset-0 z-20 flex justify-end bg-tinta/20" onClick={onCerrar}>
+    <div className="fixed inset-0 z-20 flex justify-end bg-tinta/25 backdrop-blur-[2px]" onClick={onCerrar}>
       <div
-        className="h-full w-full max-w-3xl overflow-y-auto border-l border-regla bg-papel p-6"
+        className="deslizar h-full w-full max-w-3xl overflow-y-auto border-l border-regla bg-papel-alto p-6 shadow-[var(--sombra-alta)]"
         onClick={(ev) => ev.stopPropagation()}
       >
         <div className="mb-6 flex items-start justify-between">
@@ -674,9 +668,9 @@ function Evidencia({ e, onCerrar }) {
  *  completo de lo que redactó la IA y de los ajustes que pidió el auditor. */
 function Historial({ h, onCerrar }) {
   return (
-    <div className="fixed inset-0 z-20 flex justify-end bg-tinta/20" onClick={onCerrar}>
+    <div className="fixed inset-0 z-20 flex justify-end bg-tinta/25 backdrop-blur-[2px]" onClick={onCerrar}>
       <div
-        className="h-full w-full max-w-2xl overflow-y-auto border-l border-regla bg-papel p-6"
+        className="deslizar h-full w-full max-w-2xl overflow-y-auto border-l border-regla bg-papel-alto p-6 shadow-[var(--sombra-alta)]"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-6 flex items-start justify-between">
