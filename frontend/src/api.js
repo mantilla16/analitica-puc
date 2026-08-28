@@ -76,6 +76,12 @@ export const api = {
     pedir(`/encargos/${id}/variaciones${fase ? `?fase=${fase}` : ""}`),
   iaConfig: () => pedir("/ia/config"),
   papel: (id, fase) => pedir(`/encargos/${id}/papel/${fase}`),
+  /* El Excel se descarga directo: no pasa por pedir(), que espera JSON.
+     Se navega a la ruta y el navegador toma el nombre del archivo del
+     Content-Disposition que manda el servidor. */
+  papelExcel: (id, fase) => {
+    window.location.href = `${BASE}/encargos/${id}/papel/${fase}/excel`;
+  },
   evidenciaCuenta: (id, fase, codigo) =>
     pedir(`/encargos/${id}/variaciones/${fase}/evidencia/${codigo}`),
   observacionesGuardadas: (id, fase) =>

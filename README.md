@@ -29,6 +29,7 @@ main.py           Rutas HTTP (FastAPI) -- solo orquesta, no calcula
 servicios.py       Orquestación: encargo, mapeo, procesar, cotejar, promover
 analisis.py        Explorador del balance, variaciones, observaciones de IA
 papel.py           Ensambla el papel de trabajo (NIA 520) -- no calcula, organiza
+papel_excel.py     El mismo papel en .xlsx, desde el mismo dict
 reglas.py          Fechas, materialidad, signo por herencia, cotejo, cuadres
 excel.py           Inspección y parseo de archivos .xlsx
 db.py              SQL plano contra las tablas (sin lógica de negocio)
@@ -48,7 +49,11 @@ analítica (NIA 520) con lo que el sistema ya produjo: contrato de datos
 (archivo, huella SHA-256, hoja y de qué columna salió cada campo),
 controles previos al cruce, cédula sumaria, controles de cuadre, alcance
 y selección, hallazgos, índice de riesgo, marcas de auditoría con su
-leyenda, conclusión y trazabilidad. Se imprime a PDF desde el navegador.
+leyenda, conclusión y trazabilidad. Se imprime a PDF desde el navegador o
+se descarga en Excel (`papel_excel.py`), que es el formato en el que un
+papel se archiva y se revisa: los montos van como **números con formato
+de celda**, no como texto ya formateado, para que el auditor pueda sumar
+una columna y filtrar una tabla.
 
 Dos criterios que ordenan el módulo y conviene no perder al extenderlo:
 

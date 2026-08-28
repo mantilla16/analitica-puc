@@ -92,9 +92,14 @@ export default function Papel({ encargoId, fase }) {
           <p>Corte <span className="cifra text-tinta">{fecha(id.fecha_corte)}</span></p>
           <p className="mt-0.5">Fase <span className="text-tinta">{id.fase}</span></p>
           <p className="mt-0.5">Responsable <span className="text-tinta">{id.responsable ?? "—"}</span></p>
-          <p className="mt-2 no-imprimir">
-            <Boton variante="contorno" onClick={() => window.print()}>Imprimir / PDF</Boton>
-          </p>
+          <div className="no-imprimir mt-3 flex justify-end gap-2">
+            <Boton onClick={() => api.papelExcel(encargoId, fase)}>
+              Descargar Excel
+            </Boton>
+            <Boton variante="contorno" onClick={() => window.print()}>
+              Imprimir / PDF
+            </Boton>
+          </div>
         </div>
       </div>
 

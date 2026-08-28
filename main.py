@@ -28,6 +28,7 @@ import excel as X
 import servicios as S
 import analisis as A
 import papel as P
+import papel_excel as PX
 
 ALMACEN = Path("./archivos")
 ALMACEN.mkdir(exist_ok=True)
@@ -680,6 +681,22 @@ def papel_trabajo(encargo_id: str, fase: str) -> dict:
     conclusión. Puede tardar: corre el cruce contra movimientos de cada
     cuenta seleccionada."""
     return P.papel_trabajo(encargo_id, fase)
+
+
+@app.get("/encargos/{encargo_id}/papel/{fase}/excel")
+def papel_excel(encargo_id: str, fase: str) -> Response:
+    """El mismo papel, en el formato en que se archiva y se revisa. Sale
+    del mismo dict que la pantalla: si difiriera, el papel dejaría de ser
+    reproducible."""
+    p = P.papel_trabajo(encargo_id, fase)
+    if not p.get("listo"):
+        raise HTTPException(409, p.get("motivo", "No hay con qué armar el papel"))
+    return Response(
+        content=PX.construir(p),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition":
+                 f'attachment; filename="{PX.nombre_archivo(p)}"'},
+    )
 
 
 @app.get("/encargos/{encargo_id}/variaciones/{fase}/evidencia/{codigo}")
