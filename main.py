@@ -27,6 +27,7 @@ import db
 import excel as X
 import servicios as S
 import analisis as A
+import papel as P
 
 ALMACEN = Path("./archivos")
 ALMACEN.mkdir(exist_ok=True)
@@ -670,6 +671,15 @@ def ia_config() -> dict:
     nube que 12 núcleos de CPU."""
     import ia
     return ia.config()
+
+
+@app.get("/encargos/{encargo_id}/papel/{fase}")
+def papel_trabajo(encargo_id: str, fase: str) -> dict:
+    """Papel de trabajo de revisión analítica (NIA 520): contrato de
+    datos, controles, cédula comparativa, hallazgos, marcas, riesgo y
+    conclusión. Puede tardar: corre el cruce contra movimientos de cada
+    cuenta seleccionada."""
+    return P.papel_trabajo(encargo_id, fase)
 
 
 @app.get("/encargos/{encargo_id}/variaciones/{fase}/evidencia/{codigo}")

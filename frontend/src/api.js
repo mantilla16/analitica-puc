@@ -75,6 +75,7 @@ export const api = {
   variaciones: (id, fase) =>
     pedir(`/encargos/${id}/variaciones${fase ? `?fase=${fase}` : ""}`),
   iaConfig: () => pedir("/ia/config"),
+  papel: (id, fase) => pedir(`/encargos/${id}/papel/${fase}`),
   evidenciaCuenta: (id, fase, codigo) =>
     pedir(`/encargos/${id}/variaciones/${fase}/evidencia/${codigo}`),
   observacionesGuardadas: (id, fase) =>

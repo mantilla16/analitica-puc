@@ -28,6 +28,7 @@ Excel  →  raw.*_staging  →  cotejo  →  core.balance  →  análisis (+ IA)
 main.py           Rutas HTTP (FastAPI) -- solo orquesta, no calcula
 servicios.py       Orquestación: encargo, mapeo, procesar, cotejar, promover
 analisis.py        Explorador del balance, variaciones, observaciones de IA
+papel.py           Ensambla el papel de trabajo (NIA 520) -- no calcula, organiza
 reglas.py          Fechas, materialidad, signo por herencia, cotejo, cuadres
 excel.py           Inspección y parseo de archivos .xlsx
 db.py              SQL plano contra las tablas (sin lógica de negocio)
@@ -39,6 +40,27 @@ db/                schema.sql (estructura completa) y ESQUEMA.md (qué es cada t
 
 `reglas.py`, `excel.py` e `ia.py` no tocan la base de datos: se pueden
 probar sin levantar Postgres.
+
+## El papel de trabajo
+
+La pestaña **Papel de trabajo** arma el entregable formal de revisión
+analítica (NIA 520) con lo que el sistema ya produjo: contrato de datos
+(archivo, huella SHA-256, hoja y de qué columna salió cada campo),
+controles previos al cruce, cédula sumaria, controles de cuadre, alcance
+y selección, hallazgos, índice de riesgo, marcas de auditoría con su
+leyenda, conclusión y trazabilidad. Se imprime a PDF desde el navegador.
+
+Dos criterios que ordenan el módulo y conviene no perder al extenderlo:
+
+- **`papel.py` no calcula.** Las cifras vienen de `analisis.py` y de
+  consultas a `core.balance`; el módulo las organiza y las contrasta.
+- **Un control solo es evidencia si puede fallar y si contrasta contra
+  algo que no se derive de lo que verifica.** Los que cuadran por
+  construcción se incluyen como consistencia interna, marcados
+  `es_evidencia: False`. El único control contra una fuente
+  verdaderamente independiente es el cruce contra el archivo de
+  movimientos; si ese insumo falta, se declara `NO_EJECUTADO` en vez de
+  callarse.
 
 ## Puesta en marcha
 

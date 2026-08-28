@@ -298,3 +298,24 @@ button { transition: color 0.15s ease, background-color 0.15s ease,
   outline-offset: 2px;
   border-radius: 4px;
 }
+
+/* --------------------------------------------------------- impresión */
+/* El papel de trabajo se archiva en PDF. Sin esto la impresión saca los
+   fondos de color en gris sucio, corta las tablas a mitad de fila y
+   arrastra la navegación de la aplicación al documento. */
+@media print {
+  .no-imprimir, header, .cinta-marca { display: none !important; }
+  html { background: #fff; }
+  .papel { max-width: none; padding: 0; font-size: 11px; }
+  .panel, .panel-plano {
+    box-shadow: none;
+    border-color: #999;
+    break-inside: avoid;
+  }
+  section { break-inside: avoid-page; }
+  table { break-inside: auto; }
+  tr { break-inside: avoid; break-after: auto; }
+  thead { display: table-header-group; }   /* repite encabezado por página */
+  a[href]::after { content: ""; }
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}

@@ -5,12 +5,14 @@ import Mapeo from "./Mapeo";
 import Balance from "./Balance";
 import Variaciones from "./Variaciones";
 import Materialidad from "./Materialidad";
+import Papel from "./Papel";
 
 const PESTANAS = [
   ["archivos", "Archivos"],
   ["materialidad", "Materialidad"],
   ["balance", "Balance"],
   ["variaciones", "Variaciones"],
+  ["papel", "Papel de trabajo"],
 ];
 
 export default function Encargo({ encargoId, onVolver }) {
@@ -138,6 +140,11 @@ export default function Encargo({ encargoId, onVolver }) {
       )}
       {pestana === "variaciones" && (
         <div className="mt-8"><Variaciones encargoId={encargoId} /></div>
+      )}
+      {pestana === "papel" && (
+        <div className="mt-8">
+          <Papel encargoId={encargoId} fase={enc.fase_activa} />
+        </div>
       )}
 
       {pestana === "archivos" && (<>
