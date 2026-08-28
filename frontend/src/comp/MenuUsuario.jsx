@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
-import { Aviso, Boton, Chip } from "./Piezas";
+import { Aviso, Boton, Chip, Modal } from "./Piezas";
 
 /* Iconos de trazo, del mismo grosor que el punteo: no son adornos, son
    pistas de qué hace cada opción cuando se lee de reojo. */
@@ -146,19 +146,7 @@ function CambiarClave({ onCerrar }) {
   const campo = "w-full px-3 py-2 text-sm";
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center
-                    bg-tinta/25 p-6 backdrop-blur-[2px]"
-         onClick={onCerrar}>
-      <div className="panel deslizar w-full max-w-sm p-6 shadow-[var(--sombra-alta)]"
-           onClick={(e) => e.stopPropagation()}>
-        <div className="mb-5 flex items-start justify-between">
-          <div>
-            <p className="rotulo">Su cuenta</p>
-            <h2 className="mt-1 text-lg font-semibold">Cambiar contraseña</h2>
-          </div>
-          <button onClick={onCerrar} className="rotulo hover:text-tinta">Cerrar ✕</button>
-        </div>
-
+    <Modal rotulo="Su cuenta" titulo="Cambiar contraseña" onCerrar={onCerrar}>
         {listo ? (
           <>
             <Aviso tono="ok">Contraseña actualizada.</Aviso>
@@ -202,8 +190,7 @@ function CambiarClave({ onCerrar }) {
               </Boton>
             </div>
           </form>
-        )}
-      </div>
-    </div>
+      )}
+    </Modal>
   );
 }

@@ -1,4 +1,70 @@
+import { useEffect } from "react";
 import { monto, entero } from "../api";
+
+/**
+ * Diálogo. Existe para no volver a caer en window.prompt / window.confirm:
+ * además de verse ajenos a la aplicación, el prompt del navegador muestra
+ * en claro lo que se escribe -- inaceptable para una contraseña.
+ */
+export function Modal({ titulo, rotulo, onCerrar, children, ancho = "max-w-sm" }) {
+  useEffect(() => {
+    const escape = (e) => { if (e.key === "Escape") onCerrar(); };
+    document.addEventListener("keydown", escape);
+    return () => document.removeEventListener("keydown", escape);
+  }, [onCerrar]);
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center
+                    bg-tinta/25 p-6 backdrop-blur-[2px]"
+         onClick={onCerrar}>
+      <div className={`panel deslizar w-full ${ancho} p-6 shadow-[var(--sombra-alta)]`}
+           onClick={(e) => e.stopPropagation()}>
+        <div className="mb-5 flex items-start justify-between gap-4">
+          <div>
+            {rotulo && <p className="rotulo">{rotulo}</p>}
+            <h2 className="mt-1 text-lg font-semibold">{titulo}</h2>
+          </div>
+          <button onClick={onCerrar} className="rotulo shrink-0 hover:text-tinta">
+            Cerrar ✕
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/** Confirmación de algo irreversible. El diálogo dice qué se pierde y
+ *  qué no: "¿está seguro?" a secas no le da a nadie con qué decidir. */
+export function Confirmar({ titulo, rotulo, children, textoAccion = "Confirmar",
+                            onConfirmar, onCerrar }) {
+  return (
+    <Modal titulo={titulo} rotulo={rotulo} onCerrar={onCerrar}>
+      <div className="text-sm leading-relaxed text-tinta-media">{children}</div>
+      <div className="mt-6 flex gap-3">
+        <button onClick={onConfirmar}
+                className="btn bg-rojo text-papel-alto hover:bg-rojo-vivo">
+          {textoAccion}
+        </button>
+        <Boton variante="texto" onClick={onCerrar}>Cancelar</Boton>
+      </div>
+    </Modal>
+  );
+}
+
+/** Inicial en círculo. Navy para quien administra, gris para el resto:
+ *  el rol se reconoce antes de leer la etiqueta. */
+export function Avatar({ nombre, admin = false, tam = 40 }) {
+  return (
+    <span style={{ width: tam, height: tam, fontSize: tam * 0.36 }}
+          className={`flex shrink-0 items-center justify-center rounded-full
+                      font-bold ${admin
+                        ? "bg-marca text-papel-alto"
+                        : "bg-papel-hondo text-tinta-media"}`}>
+      {(nombre ?? "?").trim().charAt(0).toUpperCase()}
+    </span>
+  );
+}
 
 /** El gesto del lápiz sobre la cifra verificada. */
 export function Punteo({ tam = 18 }) {

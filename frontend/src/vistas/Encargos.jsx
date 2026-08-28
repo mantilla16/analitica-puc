@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { api, fecha } from "../api";
-import { Aviso, Boton, Chip } from "../comp/Piezas";
+import { Aviso, Boton, Chip, Confirmar } from "../comp/Piezas";
 
 export default function Encargos({ yo, onAbrir }) {
   const [lista, setLista] = useState([]);
   const [creando, setCreando] = useState(false);
   const [error, setError] = useState(null);
   const [auditores, setAuditores] = useState([]);
+  const [borrando, setBorrando] = useState(null);   // encargo por confirmar
   const [form, setForm] = useState({
     nit: "", razon_social: "", fecha_corte: "", responsable: "",
   });
@@ -33,14 +34,8 @@ export default function Encargos({ yo, onAbrir }) {
     api.encargos().then(setLista).catch((e) => setError(e.message));
   }
 
-  async function eliminar(e, enc) {
-    e.stopPropagation();
-    const seguro = window.confirm(
-      `¿Borrar el encargo de ${enc.razon_social} (${fecha(enc.fecha_corte)})? ` +
-      `Las cargas ya subidas no se pierden, pero hay que volver a asignarlas ` +
-      `y las materialidades digitadas se pierden.`
-    );
-    if (!seguro) return;
+  async function eliminar(enc) {
+    setBorrando(null);
     try {
       await api.eliminarEncargo(enc.id);
       refrescar();
@@ -115,7 +110,7 @@ export default function Encargos({ yo, onAbrir }) {
                     </Chip>
                   </button>
                   <button
-                    onClick={(ev) => eliminar(ev, e)}
+                    onClick={(ev) => { ev.stopPropagation(); setBorrando(e); }}
                     className="rotulo shrink-0 text-tinta-suave hover:text-rojo"
                     title="Borrar este encargo"
                   >
@@ -173,6 +168,28 @@ export default function Encargos({ yo, onAbrir }) {
             </Boton>
           </div>
         </form>
+      )}
+
+      {borrando && (
+        <Confirmar
+          rotulo="Acción irreversible"
+          titulo={`Borrar el encargo de ${borrando.razon_social}`}
+          textoAccion="Borrar encargo"
+          onConfirmar={() => eliminar(borrando)}
+          onCerrar={() => setBorrando(null)}
+        >
+          <p>
+            Corte del <span className="cifra">{fecha(borrando.fecha_corte)}</span>.
+          </p>
+          <p className="mt-3">
+            Se pierden las materialidades digitadas, los parámetros de
+            selección y los análisis de IA de este encargo.
+          </p>
+          <p className="mt-3">
+            Los archivos que ya subió el cliente <strong>no</strong> se pierden,
+            pero habrá que volver a asignarlos en un encargo nuevo.
+          </p>
+        </Confirmar>
       )}
     </div>
   );
