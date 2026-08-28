@@ -667,6 +667,59 @@ def borrar_sesiones_de(usuario_id: str) -> None:
 
 
 # =====================================================================
+# BITÁCORA
+# =====================================================================
+
+def registrar(**d: Any) -> None:
+    """Inserta una entrada. `detalle` va como jsonb con cast explícito
+    porque puede traer Decimal y fechas."""
+    detalle = d.pop("detalle", None)
+    cols = list(d) + (["detalle"] if detalle is not None else [])
+    ph = ", ".join(["%s"] * len(d) + (["%s::jsonb"] if detalle is not None else []))
+    valores = list(d.values()) + (
+        [json.dumps(detalle, default=str)] if detalle is not None else []
+    )
+    ejecutar(f"INSERT INTO core.bitacora ({', '.join(cols)}) VALUES ({ph})",
+             tuple(valores))
+
+
+def bitacora(usuario: str | None = None, accion: str | None = None,
+             encargo_id: str | None = None, desde: date | None = None,
+             hasta: date | None = None, limite: int = 200,
+             desplazamiento: int = 0) -> list[dict]:
+    where, args = ["true"], []
+    if usuario:
+        where.append("b.usuario = %s"); args.append(usuario)
+    if accion:
+        where.append("b.accion = %s"); args.append(accion)
+    if encargo_id:
+        where.append("b.encargo_id = %s"); args.append(encargo_id)
+    if desde:
+        where.append("b.creado_en >= %s"); args.append(desde)
+    if hasta:
+        # El filtro es por día: se incluye el día completo indicado.
+        where.append("b.creado_en < (%s::date + 1)"); args.append(hasta)
+    return varios(
+        f"""SELECT b.*, cl.razon_social, e.fecha_corte
+            FROM core.bitacora b
+            LEFT JOIN core.encargo e ON e.id = b.encargo_id
+            LEFT JOIN core.cliente cl ON cl.id = e.cliente_id
+            WHERE {' AND '.join(where)}
+            ORDER BY b.creado_en DESC
+            LIMIT {int(limite)} OFFSET {int(desplazamiento)}""",
+        tuple(args),
+    )
+
+
+def acciones_registradas() -> list[dict]:
+    """Para poblar el filtro sin inventar una lista fija que se
+    desactualice cuando aparezcan acciones nuevas."""
+    return varios(
+        "SELECT accion, count(*) AS n FROM core.bitacora GROUP BY accion ORDER BY accion"
+    )
+
+
+# =====================================================================
 # OBSERVACIONES DE IA
 # =====================================================================
 

@@ -17,7 +17,7 @@ Grupos de tablas por cómo se usan:
 2. **Operación** -- lo que crea el auditor (clientes, encargos, cargas, materialidad).
 3. **Staging y datos** -- lo que entra de los Excel y lo ya validado.
 4. **Evidencia** -- el rastro de cotejos, hallazgos y alertas.
-5. **Acceso** -- usuarios y sesiones.
+5. **Acceso y rastro** -- usuarios, sesiones y bitácora de uso.
 
 ---
 
@@ -289,7 +289,7 @@ no está incorporado en `schema.sql`.
 
 ---
 
-## 5. Acceso
+## 5. Acceso y rastro
 
 ### `core.usuario`
 Una fila por auditor. `usuario` (con el que entra), `nombre`, `correo`,
@@ -307,6 +307,37 @@ servidor.
 `core.materialidad.aprobado_por` y `core.observacion_ia.creado_por`
 guardan el nombre de usuario, y ese rastro tiene que seguir siendo
 legible años después.
+
+### `core.bitacora`
+El rastro de uso: quién hizo qué, cuándo y desde dónde. Una herramienta
+de auditoría tiene que poder auditarse a sí misma.
+
+Columnas: `usuario_id` y `usuario` (este último **desnormalizado**, para
+que el registro siga siendo legible aunque la cuenta cambie o se
+desactive), `accion`, `entidad`/`entidad_id`, `encargo_id`, `detalle`
+(jsonb con el contexto: nombre del archivo, valores guardados, cuenta
+afectada), `exito`, `estado_http`, `ip` y `agente`.
+
+**Qué se registra y qué no:** todo lo que escribe (POST, PUT, PATCH,
+DELETE) y los ingresos, incluidos los fallidos. Las lecturas no: serían
+ruido y no cambian nada.
+
+El registro es automático, en el middleware, por la misma razón que la
+sesión: un endpoint nuevo que modifique datos queda registrado aunque
+nadie se acuerde de anotarlo. Los endpoints solo enriquecen el `detalle`
+dejando contexto en `request.state.bitacora`.
+
+Dos detalles que importan para que sirva de evidencia:
+
+- **La `ip` sale de `X-Real-IP`/`X-Forwarded-For`**, no de la conexión
+  directa: detrás de nginx esa siempre sería `127.0.0.1`.
+- **Los ingresos fallidos guardan el motivo real** (usuario inexistente,
+  cuenta desactivada, contraseña incorrecta), aunque a quien intenta
+  entrar se le responda siempre lo mismo. Quien revisa necesita
+  distinguir un olvido de un tanteo.
+
+Crece indefinidamente: la política de retención está por definirse junto
+con la de papeles de trabajo.
 
 ### `core.sesion`
 Sesiones vivas. `token_hash` (PK), `usuario_id`, `expira_en`, `agente`.

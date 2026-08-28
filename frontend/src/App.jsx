@@ -4,6 +4,7 @@ import Encargos from "./vistas/Encargos";
 import Encargo from "./vistas/Encargo";
 import Login from "./vistas/Login";
 import Usuarios from "./vistas/Usuarios";
+import Bitacora from "./vistas/Bitacora";
 import { Boton, Chip } from "./comp/Piezas";
 
 export default function App() {
@@ -51,18 +52,26 @@ export default function App() {
           <span className="text-sm font-semibold">{yo.nombre}</span>
           {yo.rol === "ADMIN" && <Chip tono="morado">admin</Chip>}
           <div className="ml-auto flex items-center gap-3">
-            {yo.rol === "ADMIN" && vista !== "usuarios" && (
-              <button onClick={() => setVista("usuarios")}
-                      className="pestana">
-                Usuarios
-              </button>
+            {yo.rol === "ADMIN" && (
+              <>
+                <button onClick={() => setVista("bitacora")}
+                        className={`pestana ${vista === "bitacora" ? "pestana-activa" : ""}`}>
+                  Bitácora
+                </button>
+                <button onClick={() => setVista("usuarios")}
+                        className={`pestana ${vista === "usuarios" ? "pestana-activa" : ""}`}>
+                  Usuarios
+                </button>
+              </>
             )}
             <Boton variante="texto" onClick={salir}>Salir</Boton>
           </div>
         </div>
       </div>
 
-      {vista === "usuarios"
+      {vista === "bitacora"
+        ? <Bitacora onVolver={() => setVista("encargos")} />
+        : vista === "usuarios"
         ? <Usuarios yo={yo} onVolver={() => setVista("encargos")} />
         : encargoId
           ? <Encargo encargoId={encargoId} onVolver={() => setEncargoId(null)} />

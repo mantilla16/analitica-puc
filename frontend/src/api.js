@@ -37,6 +37,11 @@ export const api = {
 
   auditores: () => pedir("/usuarios/activos"),
   usuarios: () => pedir("/usuarios"),
+  bitacora: (f = {}) => {
+    const p = new URLSearchParams();
+    Object.entries(f).forEach(([k, v]) => { if (v) p.set(k, v); });
+    return pedir(`/bitacora?${p}`);
+  },
   crearUsuario: (d) => pedir("/usuarios", json("POST", d)),
   editarUsuario: (id, d) => pedir(`/usuarios/${id}`, json("PUT", d)),
   reiniciarClave: (id, clave) => pedir(`/usuarios/${id}/clave`, json("PUT", { clave })),

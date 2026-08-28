@@ -9,6 +9,7 @@ La base solo tiene tablas. Toda la lógica está en reglas.py y servicios.py.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import tempfile
 from datetime import date, datetime, timedelta, timezone
@@ -66,12 +67,54 @@ def _cerrar() -> None:
 # Lo único accesible sin sesión. Todo lo demás exige haber entrado.
 PUBLICAS = {"/auth/login", "/auth/estado"}
 
+# Nombre legible de cada acción, derivado de la ruta. El registro se hace
+# solo, para todo método que escriba: si mañana se agrega un endpoint que
+# modifica datos, queda registrado aunque nadie se acuerde de anotarlo.
+# Lo que no esté en esta tabla se guarda con su método y ruta.
+ACCIONES = [
+    ("POST",   r"^/auth/logout$",                     "SALIDA",               "usuario"),
+    ("POST",   r"^/encargos$",                        "ENCARGO_CREADO",       "encargo"),
+    ("DELETE", r"^/encargos/[^/]+$",                  "ENCARGO_BORRADO",      "encargo"),
+    ("POST",   r"^/encargos/[^/]+/cargas$",           "ARCHIVO_SUBIDO",       "carga"),
+    ("POST",   r"^/cargas/[^/]+/mapeo$",              "MAPEO_CONFIRMADO",     "carga"),
+    ("POST",   r"^/cargas/[^/]+/procesar$",           "CARGA_PROCESADA",      "carga"),
+    ("POST",   r"^/cargas/[^/]+/promover$",           "BALANCE_PROMOVIDO",    "carga"),
+    ("PUT",    r"^/encargos/[^/]+/materialidades/",   "MATERIALIDAD_GUARDADA","encargo"),
+    ("PUT",    r"^/encargos/[^/]+/parametros$",       "PARAMETROS_GUARDADOS", "encargo"),
+    ("PUT",    r"^/encargos/[^/]+/fase/",             "FASE_CAMBIADA",        "encargo"),
+    ("POST",   r"/observaciones/lote$",               "OBSERVACIONES_IA",     "cuenta"),
+    ("POST",   r"/observacion/[^/]+$",                "OBSERVACION_IA",       "cuenta"),
+    ("POST",   r"^/usuarios$",                        "USUARIO_CREADO",       "usuario"),
+    ("PUT",    r"^/usuarios/[^/]+/clave$",            "CLAVE_REINICIADA",     "usuario"),
+    ("PUT",    r"^/usuarios/[^/]+$",                  "USUARIO_EDITADO",      "usuario"),
+    ("PUT",    r"^/auth/clave$",                      "CLAVE_CAMBIADA",       "usuario"),
+    ("POST",   r"^/alertas/[^/]+/reconocer$",         "ALERTA_RECONOCIDA",    "alerta"),
+    ("POST",   r"^/alertas/despachar$",               "ALERTAS_DESPACHADAS",  "alerta"),
+]
+
+_ENCARGO_EN_RUTA = re.compile(r"^/encargos/([0-9a-fA-F-]{36})")
+
+
+def _accion_de(metodo: str, ruta: str) -> tuple[str, str | None]:
+    for m, patron, accion, entidad in ACCIONES:
+        if m == metodo and re.search(patron, ruta):
+            return accion, entidad
+    return f"{metodo} {ruta}", None
+
+
+def _ip(request: Request) -> str | None:
+    """Detrás de nginx la dirección directa siempre sería 127.0.0.1; la
+    real viene en las cabeceras que nginx agrega."""
+    return (request.headers.get("x-real-ip")
+            or (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+            or (request.client.host if request.client else None))
+
 
 @app.middleware("http")
 async def exigir_sesion(request: Request, call_next):
     """Puerta única: en vez de proteger ruta por ruta -- donde olvidar un
     decorador deja un hueco silencioso -- se exige sesión para todo y se
-    listan las excepciones."""
+    listan las excepciones. De paso deja el rastro de toda escritura."""
     ruta = request.url.path
     if request.method == "OPTIONS" or ruta in PUBLICAS:
         return await call_next(request)
@@ -82,7 +125,30 @@ async def exigir_sesion(request: Request, call_next):
         return JSONResponse({"detail": "No autenticado"}, status_code=401)
 
     request.state.usuario = u
-    return await call_next(request)
+    respuesta = await call_next(request)
+
+    if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+        accion, entidad = _accion_de(request.method, ruta)
+        enc = _ENCARGO_EN_RUTA.match(ruta)
+        try:
+            db.registrar(
+                usuario_id=u["id"], usuario=u["usuario"],
+                accion=accion, entidad=entidad,
+                entidad_id=ruta.rstrip("/").rsplit("/", 1)[-1],
+                encargo_id=enc.group(1) if enc else None,
+                # Los endpoints enriquecen el registro dejando contexto en
+                # request.state; el registro base existe igual sin eso.
+                detalle=getattr(request.state, "bitacora", None),
+                exito=respuesta.status_code < 400,
+                estado_http=respuesta.status_code,
+                ip=_ip(request), agente=request.headers.get("user-agent"),
+            )
+        except Exception:
+            # El rastro no puede tumbar la operación que estaba
+            # registrando: se pierde la entrada, no el trabajo del auditor.
+            pass
+
+    return respuesta
 
 
 def _yo(request: Request) -> dict:
@@ -140,6 +206,16 @@ def login(c: Credenciales, request: Request, response: Response) -> dict:
     # Mismo mensaje para usuario inexistente, contraseña mala o cuenta
     # desactivada: decir cuál de los tres falló ayuda a quien tantea.
     if not u or not u["activo"] or not auth.verificar_clave(c.clave, u["clave_hash"]):
+        # El intento fallido sí se guarda con el motivo real: es la señal
+        # de que alguien está probando, y quien revisa la bitácora
+        # necesita distinguir un olvido de contraseña de un tanteo.
+        motivo = ("usuario inexistente" if not u
+                  else "cuenta desactivada" if not u["activo"]
+                  else "contraseña incorrecta")
+        db.registrar(usuario_id=u["id"] if u else None, usuario=c.usuario,
+                     accion="INGRESO_FALLIDO", entidad="usuario",
+                     detalle={"motivo": motivo}, exito=False, estado_http=401,
+                     ip=_ip(request), agente=request.headers.get("user-agent"))
         raise HTTPException(401, "Usuario o contraseña incorrectos")
 
     token = auth.nuevo_token()
@@ -151,6 +227,9 @@ def login(c: Credenciales, request: Request, response: Response) -> dict:
         COOKIE, token, httponly=True, samesite="lax",
         secure=SESION_SEGURA, max_age=SESION_HORAS * 3600, path="/",
     )
+    db.registrar(usuario_id=u["id"], usuario=u["usuario"], accion="INGRESO",
+                 entidad="usuario", ip=_ip(request),
+                 agente=request.headers.get("user-agent"))
     return {"usuario": u["usuario"], "nombre": u["nombre"], "rol": u["rol"]}
 
 
@@ -160,6 +239,7 @@ def logout(request: Request, response: Response) -> dict:
     if token:
         db.borrar_sesion(auth.hash_token(token))
     response.delete_cookie(COOKIE, path="/")
+    request.state.bitacora = {"motivo": "salida voluntaria"}
     return {"ok": True}
 
 
@@ -200,6 +280,25 @@ def listar_usuarios(request: Request) -> list[dict]:
     return db.usuarios()
 
 
+# =====================================================================
+# BITÁCORA
+# =====================================================================
+
+@app.get("/bitacora")
+def ver_bitacora(request: Request, usuario: str | None = None,
+                 accion: str | None = None, encargo_id: str | None = None,
+                 desde: date | None = None, hasta: date | None = None,
+                 limite: int = 200, desplazamiento: int = 0) -> dict:
+    """Rastro de uso. Solo para ADMIN: dice quién hizo qué y desde dónde,
+    y eso no es información que deba circular entre todo el equipo."""
+    _exigir_admin(request)
+    return {
+        "filas": db.bitacora(usuario, accion, encargo_id, desde, hasta,
+                             min(limite, 500), desplazamiento),
+        "acciones": db.acciones_registradas(),
+    }
+
+
 @app.post("/usuarios")
 def crear_usuario(u: UsuarioNuevo, request: Request) -> dict:
     _exigir_admin(request)
@@ -210,6 +309,8 @@ def crear_usuario(u: UsuarioNuevo, request: Request) -> dict:
         raise HTTPException(409, f"El usuario {u.usuario} ya existe")
     if u.rol not in ("ADMIN", "AUDITOR"):
         raise HTTPException(422, "Rol debe ser ADMIN o AUDITOR")
+    request.state.bitacora = {"usuario": u.usuario, "nombre": u.nombre,
+                              "rol": u.rol}
     return db.crear_usuario(u.usuario, u.nombre, u.correo,
                             auth.hash_clave(u.clave), u.rol)
 
@@ -234,6 +335,7 @@ def editar_usuario(usuario_id: str, c: UsuarioCambio, request: Request) -> dict:
         if campos.get("rol") == "AUDITOR":
             raise HTTPException(409, "No puede quitarse a sí mismo el rol ADMIN")
 
+    request.state.bitacora = {"objetivo": objetivo["usuario"], "cambios": campos}
     r = db.actualizar_usuario(usuario_id, **campos)
     if campos.get("activo") is False:
         db.borrar_sesiones_de(usuario_id)
@@ -245,8 +347,10 @@ def reiniciar_clave(usuario_id: str, c: ClaveNueva, request: Request) -> dict:
     """Un admin asigna contraseña nueva a otro usuario, sin conocer la
     anterior. Cierra las sesiones de esa cuenta."""
     _exigir_admin(request)
-    if not db.usuario_por_id(usuario_id):
+    objetivo = db.usuario_por_id(usuario_id)
+    if not objetivo:
         raise HTTPException(404, "Usuario no existe")
+    request.state.bitacora = {"objetivo": objetivo["usuario"]}
     problema = auth.problema_con_clave(c.clave)
     if problema:
         raise HTTPException(422, problema)
@@ -301,7 +405,10 @@ def _carga(carga_id: str) -> dict:
 # ------------------------------------------------------------------ encargos
 
 @app.post("/encargos")
-def abrir_encargo(e: EncargoNuevo) -> dict:
+def abrir_encargo(e: EncargoNuevo, request: Request) -> dict:
+    request.state.bitacora = {"nit": e.nit, "razon_social": e.razon_social,
+                              "fecha_corte": e.fecha_corte,
+                              "responsable": e.responsable}
     return S.abrir_encargo(e.nit, e.razon_social, e.fecha_corte, e.responsable)
 
 
@@ -319,13 +426,17 @@ def ver_encargo(encargo_id: str) -> dict:
 
 
 @app.delete("/encargos/{encargo_id}")
-def eliminar_encargo(encargo_id: str) -> dict:
+def eliminar_encargo(encargo_id: str, request: Request) -> dict:
     """Borra el encargo. Las cargas ya subidas (y su balance promovido)
     no se tocan -- son del cliente, no del encargo -- así que la próxima
     vez que se abra un encargo nuevo para el mismo NIT, sigue pudiendo
     reutilizarlas si aplica."""
-    if not db.encargo(encargo_id):
+    enc = db.encargo(encargo_id)
+    if not enc:
         raise HTTPException(404, "Encargo no existe")
+    # Se anota antes de borrar: después ya no hay a quién preguntarle.
+    request.state.bitacora = {"razon_social": enc["razon_social"],
+                              "nit": enc["nit"], "fecha_corte": enc["fecha_corte"]}
     db.eliminar_encargo(encargo_id)
     return {"eliminado": True}
 
@@ -351,6 +462,8 @@ def materialidades(encargo_id: str) -> dict:
 @app.put("/encargos/{encargo_id}/materialidades/{fase}")
 def guardar_materialidad(encargo_id: str, fase: str, m: MaterialidadEntrada,
                          request: Request) -> dict:
+    request.state.bitacora = {"fase": fase, "valor": m.valor,
+                              "porcentaje": m.porcentaje, "aplicar": m.aplicar}
     fila = db.guardar_materialidad(encargo_id, fase, m.valor, m.porcentaje,
                                    m.aplicar, m.nombre, _quien(request))
     if not fila:
@@ -365,7 +478,8 @@ def fijar_fase(encargo_id: str, fase: str) -> dict:
 
 
 @app.put("/encargos/{encargo_id}/parametros")
-def guardar_parametros(encargo_id: str, p: Parametros) -> dict:
+def guardar_parametros(encargo_id: str, p: Parametros, request: Request) -> dict:
+    request.state.bitacora = p.model_dump()
     db.guardar_parametros(encargo_id, p.pct_variacion, p.pct_trivialidad,
                           p.aplica_variacion, p.aplica_trivialidad)
     return db.parametros(encargo_id)
@@ -405,6 +519,11 @@ async def subir(
                            perfil["id"] if perfil else None, _quien(request))
         db.asignar_insumo(encargo_id, tipo, c["id"])
 
+        request.state.bitacora = {
+            "tipo": tipo, "archivo": archivo.filename, "hash": hash_,
+            "periodo": f"{periodo_ini} a {periodo_fin}",
+            "requiere_mapeo": perfil is None,
+        }
         est = X.inspeccionar(destino, set(db.sinonimos(ins["naturaleza"])))
         return {
             "carga_id": c["id"], "tipo": tipo,
@@ -468,18 +587,31 @@ def procesar(carga_id: str, tareas: BackgroundTasks,
         raise HTTPException(409, "La carga no tiene perfil de mapeo confirmado")
 
     if sincrono:                        # útil para balances (820 filas)
-        return S.procesar(carga_id)
+        r = S.procesar(carga_id)
+        request.state.bitacora = {
+            "tipo": c["tipo"], "resultado": r.get("resultado"),
+            "filas_staging": r.get("filas_staging"),
+            "fuera_periodo": r.get("n_fuera_periodo"),
+        }
+        return r
 
     tareas.add_task(_tarea, carga_id)   # movimientos: ~40 s
     return {"carga_id": carga_id, "estado": "PROCESANDO"}
 
 
 @app.post("/cargas/{carga_id}/promover")
-def promover(carga_id: str) -> dict:
+def promover(carga_id: str, request: Request) -> dict:
     c = _carga(carga_id)
     if c["naturaleza"] != "BALANCE":
         raise HTTPException(400, "Por ahora solo se promueven balances")
-    return S.promover_balance(carga_id)
+    r = S.promover_balance(carga_id)
+    request.state.bitacora = {
+        "tipo": c["tipo"], "archivo": Path(c["archivo"]).name,
+        "promovidas": r["promovidas"], "descartadas": r["descartadas"],
+        "descuadres_linea": r["descuadres_linea"],
+        "cuadre": {q["nivel"]: q["estado"] for q in r["cuadre"]},
+    }
+    return r
 
 
 @app.get("/cargas/{carga_id}")
