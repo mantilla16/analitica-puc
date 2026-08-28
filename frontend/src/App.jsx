@@ -39,15 +39,17 @@ export default function App() {
 
   return (
     <>
-      <div className="sticky top-0 z-10 border-b border-regla
+      {/* Los colores del anillo del logotipo, como firma de la marca */}
+      <div className="cinta-marca sticky top-0 z-20" />
+      <div className="sticky top-[3px] z-10 border-b border-regla
                       bg-papel-alto/85 backdrop-blur">
         <div className="mx-auto flex max-w-5xl items-center gap-3 px-6 py-2.5">
           <span className="flex h-7 w-7 items-center justify-center rounded-full
-                           bg-verde text-xs font-bold text-papel-alto">
+                           bg-marca text-xs font-bold text-papel-alto">
             {yo.nombre.trim().charAt(0).toUpperCase()}
           </span>
           <span className="text-sm font-semibold">{yo.nombre}</span>
-          {yo.rol === "ADMIN" && <Chip tono="verde">admin</Chip>}
+          {yo.rol === "ADMIN" && <Chip tono="morado">admin</Chip>}
           <div className="ml-auto flex items-center gap-3">
             {yo.rol === "ADMIN" && vista !== "usuarios" && (
               <button onClick={() => setVista("usuarios")}

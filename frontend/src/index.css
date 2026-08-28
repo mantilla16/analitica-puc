@@ -1,12 +1,18 @@
 @import "tailwindcss";
 
 /* ---------------------------------------------------------------
-   SISTEMA DE DISEÑO
+   SISTEMA DE DISEÑO — Russell Bedford
 
-   El oficio sigue mandando: lápiz verde = verificado, rojo =
-   excepción, ámbar = revisar. Lo que cambia es el tono -- superficies
-   elevadas, esquinas suaves y color más vivo -- para que se sienta una
-   herramienta actual y no una hoja impresa.
+   Dos familias de color, y la distinción importa:
+
+   · MARCA (navy, cian, morado, naranja) viste la interfaz: navegación,
+     acciones, identidad. Son los colores del anillo del logo.
+   · ESTADO (verde, rojo) conserva el código del oficio: verde =
+     verificado, rojo = excepción. Eso no se cambia por marca -- un
+     descuadre no puede salir en morado corporativo porque quede bonito.
+
+   El naranja de la marca sí reemplaza al ámbar de "revisar", porque
+   coincide en función y en tono.
 
    Montserrat para todo el texto. Las CIFRAS van en JetBrains Mono: es
    la única forma de que las columnas de saldos se alineen dígito con
@@ -14,30 +20,43 @@
    números desalineados es ilegible.
    --------------------------------------------------------------- */
 @theme {
-  /* Superficies -- papel frío, con profundidad */
-  --color-papel:       #eef2f6;
-  --color-papel-hondo: #e3eaf1;
+  /* Superficies -- papel frío con matiz azulado, hacia el navy */
+  --color-papel:       #eef1f7;
+  --color-papel-hondo: #e3e7f2;
   --color-papel-alto:  #ffffff;
 
-  /* Tinta */
-  --color-tinta:       #0f1e28;
-  --color-tinta-media: #445a67;
-  --color-tinta-suave: #7c8f9c;
+  /* Tinta -- negro azulado, de la familia del navy de marca */
+  --color-tinta:       #14143a;
+  --color-tinta-media: #4a4a70;
+  --color-tinta-suave: #85859f;
 
   /* Reglas */
-  --color-regla:       #d8e2ea;
-  --color-regla-fina:  #eaf0f5;
+  --color-regla:       #dcdfeb;
+  --color-regla-fina:  #ecEEF6;
 
-  /* Semánticos -- más saturados que antes, para que el estado se lea
-     de un vistazo sin tener que buscar la etiqueta */
+  /* Marca */
+  --color-marca:       #1b1a5e;   /* navy del logotipo */
+  --color-marca-vivo:  #302e8f;
+  --color-marca-tenue: #e8e8f4;
+  --color-cian:        #00bce4;   /* del anillo */
+  --color-cian-hondo:  #0093b3;   /* el cian puro no alcanza contraste
+                                     para texto; este sí */
+  --color-cian-tenue:  #e2f7fc;
+  --color-morado:      #92278f;
+  --color-morado-tenue:#f7e9f7;
+  --color-naranja:     #ef8a00;   /* relleno y acentos */
+
+  /* Estado */
   --color-verde:       #0d7a57;
   --color-verde-vivo:  #10a473;
   --color-verde-tenue: #ddf3ea;
   --color-rojo:        #c0392b;
   --color-rojo-vivo:   #e04b3a;
   --color-rojo-tenue:  #fdeae7;
-  --color-ambar:       #b57608;
-  --color-ambar-tenue: #fdf3dc;
+  /* "Revisar" pasa al naranja de marca, en versión oscura para que el
+     texto sea legible sobre fondo claro */
+  --color-ambar:       #b56a00;
+  --color-ambar-tenue: #fdf0da;
 
   --font-sans: "Montserrat", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, "IBM Plex Mono", monospace;
@@ -51,9 +70,19 @@
   --radio-chico: 8px;
 }
 
+/* La cinta del anillo del logo, en el borde superior de la aplicación */
+.cinta-marca {
+  height: 3px;
+  background: linear-gradient(90deg,
+    var(--color-cian) 0%,
+    var(--color-naranja) 33%,
+    var(--color-morado) 66%,
+    var(--color-cian) 100%);
+}
+
 html {
   background:
-    radial-gradient(1200px 600px at 50% -10%, #f7fafc 0%, transparent 70%),
+    radial-gradient(1200px 600px at 50% -10%, #f8fafd 0%, transparent 70%),
     var(--color-papel);
   background-attachment: fixed;
   color: var(--color-tinta);
@@ -112,7 +141,7 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 }
 .tarjeta-activa:hover {
   box-shadow: var(--sombra-media);
-  border-color: var(--color-verde-vivo);
+  border-color: var(--color-cian);
   transform: translateY(-1px);
 }
 
@@ -126,15 +155,15 @@ input[type="email"], input[type="date"], select, textarea {
 }
 input:focus, select:focus, textarea:focus {
   outline: none;
-  border-color: var(--color-verde-vivo);
-  box-shadow: 0 0 0 3px rgb(16 164 115 / 0.15);
+  border-color: var(--color-cian);
+  box-shadow: 0 0 0 3px rgb(0 188 228 / 0.22);
 }
 input:disabled, select:disabled, textarea:disabled { background: var(--color-papel-hondo); }
 
 /* Casillas del tamaño y color del sistema, no las del navegador */
 input[type="checkbox"] {
   width: 1rem; height: 1rem;
-  accent-color: var(--color-verde);
+  accent-color: var(--color-marca);
   cursor: pointer;
 }
 
@@ -151,12 +180,12 @@ button { transition: color 0.15s ease, background-color 0.15s ease,
   letter-spacing: 0.01em;
 }
 .btn-principal {
-  background: var(--color-verde);
+  background: var(--color-marca);
   color: #fff;
   box-shadow: var(--sombra-baja);
 }
 .btn-principal:hover:not(:disabled) {
-  background: var(--color-verde-vivo);
+  background: var(--color-marca-vivo);
   box-shadow: var(--sombra-media);
 }
 .btn-contorno {
@@ -165,8 +194,8 @@ button { transition: color 0.15s ease, background-color 0.15s ease,
   color: var(--color-tinta);
 }
 .btn-contorno:hover:not(:disabled) {
-  border-color: var(--color-verde-vivo);
-  color: var(--color-verde);
+  border-color: var(--color-cian);
+  color: var(--color-cian-hondo);
 }
 .btn-texto {
   color: var(--color-tinta-media);
@@ -175,7 +204,7 @@ button { transition: color 0.15s ease, background-color 0.15s ease,
   text-underline-offset: 4px;
   text-decoration-thickness: 1px;
 }
-.btn-texto:hover:not(:disabled) { color: var(--color-verde); }
+.btn-texto:hover:not(:disabled) { color: var(--color-cian-hondo); }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* Variante compacta. Va después de `.btn` para ganarle el padding sin
@@ -194,11 +223,11 @@ button { transition: color 0.15s ease, background-color 0.15s ease,
 }
 .pestana:hover { color: var(--color-tinta); background: var(--color-papel-hondo); }
 .pestana-activa {
-  background: var(--color-tinta);
+  background: var(--color-marca);
   color: var(--color-papel-alto);
   font-weight: 600;
 }
-.pestana-activa:hover { background: var(--color-tinta); color: var(--color-papel-alto); }
+.pestana-activa:hover { background: var(--color-marca); color: var(--color-papel-alto); }
 
 /* ------------------------------------------------------------ tablas */
 .tabla thead tr { background: var(--color-papel-hondo); }
@@ -219,6 +248,9 @@ button { transition: color 0.15s ease, background-color 0.15s ease,
 .chip-rojo  { background: var(--color-rojo-tenue);  color: var(--color-rojo); }
 .chip-ambar { background: var(--color-ambar-tenue); color: var(--color-ambar); }
 .chip-gris  { background: var(--color-papel-hondo); color: var(--color-tinta-media); }
+.chip-marca { background: var(--color-marca-tenue); color: var(--color-marca); }
+.chip-cian  { background: var(--color-cian-tenue);  color: var(--color-cian-hondo); }
+.chip-morado{ background: var(--color-morado-tenue);color: var(--color-morado); }
 
 /* Punteo: el gesto del lápiz sobre la cifra verificada */
 @keyframes puntear {
@@ -246,7 +278,7 @@ button { transition: color 0.15s ease, background-color 0.15s ease,
 }
 
 *:focus-visible {
-  outline: 2px solid var(--color-verde-vivo);
+  outline: 2px solid var(--color-cian);
   outline-offset: 2px;
   border-radius: 4px;
 }

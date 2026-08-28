@@ -30,12 +30,16 @@ export default function Login({ onEntrar }) {
   const campo = "w-full px-3 py-2 text-sm";
 
   return (
+    <>
+    <div className="cinta-marca" />
     <div className="mx-auto flex min-h-screen max-w-sm flex-col justify-center px-6">
-      <header className="mb-8 border-b border-regla pb-6">
-        <p className="rotulo">Russell Bedford · Analítica</p>
-        <h1 className="mt-2 text-2xl font-semibold tracking-tight">
-          Balances y movimientos
-        </h1>
+      <header className="mb-8">
+        <div className="panel px-6 py-5">
+          <p className="rotulo">Russell Bedford · Analítica</p>
+          <h1 className="mt-2 text-2xl font-semibold tracking-tight text-marca">
+            Balances y movimientos
+          </h1>
+        </div>
       </header>
 
       {error && <div className="mb-5"><Aviso tono="error">{error}</Aviso></div>}
@@ -65,5 +69,6 @@ export default function Login({ onEntrar }) {
         auditoría. No comparta sus credenciales.
       </p>
     </div>
+    </>
   );
 }
