@@ -5,7 +5,8 @@ import Encargo from "./vistas/Encargo";
 import Login from "./vistas/Login";
 import Usuarios from "./vistas/Usuarios";
 import Bitacora from "./vistas/Bitacora";
-import { Boton, Chip } from "./comp/Piezas";
+import { Anillo } from "./comp/Piezas";
+import MenuUsuario from "./comp/MenuUsuario";
 
 export default function App() {
   const [yo, setYo] = useState(null);
@@ -41,33 +42,26 @@ export default function App() {
   return (
     <>
       {/* Los colores del anillo del logotipo, como firma de la marca */}
-      <div className="cinta-marca sticky top-0 z-20" />
-      <div className="sticky top-[3px] z-10 border-b border-regla
-                      bg-papel-alto/85 backdrop-blur">
-        <div className="mx-auto flex max-w-5xl items-center gap-3 px-6 py-2.5">
-          <span className="flex h-7 w-7 items-center justify-center rounded-full
-                           bg-marca text-xs font-bold text-papel-alto">
-            {yo.nombre.trim().charAt(0).toUpperCase()}
-          </span>
-          <span className="text-sm font-semibold">{yo.nombre}</span>
-          {yo.rol === "ADMIN" && <Chip tono="morado">admin</Chip>}
-          <div className="ml-auto flex items-center gap-3">
-            {yo.rol === "ADMIN" && (
-              <>
-                <button onClick={() => setVista("bitacora")}
-                        className={`pestana ${vista === "bitacora" ? "pestana-activa" : ""}`}>
-                  Bitácora
-                </button>
-                <button onClick={() => setVista("usuarios")}
-                        className={`pestana ${vista === "usuarios" ? "pestana-activa" : ""}`}>
-                  Usuarios
-                </button>
-              </>
-            )}
-            <Boton variante="texto" onClick={salir}>Salir</Boton>
+      <div className="cinta-marca sticky top-0 z-30" />
+      <header className="sticky top-[3px] z-20 border-b border-regla
+                         bg-papel-alto/85 backdrop-blur">
+        <div className="mx-auto flex max-w-6xl items-center gap-3 px-6 py-2">
+          {/* La marca ancla el encabezado a la izquierda y sirve de
+              regreso al inicio; antes el lado izquierdo estaba vacío y
+              todo el peso caía en tres botones sueltos a la derecha. */}
+          <button onClick={() => { setVista("encargos"); setEncargoId(null); }}
+                  className="flex items-center gap-2.5 rounded-full px-1 py-1
+                             transition-colors hover:opacity-80">
+            <Anillo tam={26} grosor={18} />
+            <span className="text-sm font-bold tracking-tight">Russell Bedford</span>
+            <span className="rotulo hidden sm:inline">Analítica</span>
+          </button>
+
+          <div className="ml-auto">
+            <MenuUsuario yo={yo} vista={vista} onIr={setVista} onSalir={salir} />
           </div>
         </div>
-      </div>
+      </header>
 
       {vista === "bitacora"
         ? <Bitacora onVolver={() => setVista("encargos")} />

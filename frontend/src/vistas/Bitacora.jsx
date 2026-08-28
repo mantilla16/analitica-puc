@@ -3,6 +3,7 @@ import { api, entero } from "../api";
 import { Aviso, Boton, Chip } from "../comp/Piezas";
 
 const PAGINA = 100;
+const SIN_FILTRO = { usuario: "", accion: "", desde: "", hasta: "" };
 
 /* Tono por familia de acción: lo que borra o falla debe saltar a la vista
    sin tener que leer el nombre de la acción. */
@@ -30,7 +31,7 @@ function cuando(iso) {
 
 export default function Bitacora({ onVolver }) {
   const [d, setD] = useState(null);
-  const [filtro, setFiltro] = useState({ usuario: "", accion: "", desde: "", hasta: "" });
+  const [filtro, setFiltro] = useState(SIN_FILTRO);
   const [pagina, setPagina] = useState(0);
   const [error, setError] = useState(null);
   const [abierta, setAbierta] = useState(null);
@@ -44,6 +45,10 @@ export default function Bitacora({ onVolver }) {
   useEffect(() => { cargar(); }, [cargar]);
 
   const campo = "px-3 py-2 text-sm";
+  const hayFiltro = Object.values(filtro).some(Boolean);
+  // El total sale del conteo por acción, que ya viene con la respuesta:
+  // evita una consulta aparte solo para saber cuántos registros hay.
+  const total = (d?.acciones ?? []).reduce((n, a) => n + Number(a.n), 0);
   const editar = (k) => (e) => {
     setPagina(0);
     setFiltro({ ...filtro, [k]: e.target.value });
@@ -68,16 +73,18 @@ export default function Bitacora({ onVolver }) {
       {error && <div className="mb-6"><Aviso tono="error">{String(error)}</Aviso></div>}
 
       {/* ------------------------------------------------------ filtros */}
-      <div className="mb-5 flex flex-wrap items-end gap-4">
+      {/* Agrupados en un panel: sueltos sobre el fondo parecían campos
+          abandonados, y no se leía que actúan sobre la tabla de abajo. */}
+      <div className="panel mb-5 flex flex-wrap items-end gap-4 p-4">
         <label className="block">
           <span className="rotulo">Usuario</span>
           <input value={filtro.usuario} onChange={editar("usuario")}
-                 placeholder="todos" className={`${campo} mt-1 w-40`} />
+                 placeholder="todos" className={`${campo} mt-1.5 w-40`} />
         </label>
         <label className="block">
           <span className="rotulo">Acción</span>
           <select value={filtro.accion} onChange={editar("accion")}
-                  className={`${campo} mt-1 w-56`}>
+                  className={`${campo} mt-1.5 w-60`}>
             <option value="">Todas</option>
             {(d?.acciones ?? []).map((a) => (
               <option key={a.accion} value={a.accion}>
@@ -89,17 +96,22 @@ export default function Bitacora({ onVolver }) {
         <label className="block">
           <span className="rotulo">Desde</span>
           <input type="date" value={filtro.desde} onChange={editar("desde")}
-                 className={`cifra ${campo} mt-1`} />
+                 className={`cifra ${campo} mt-1.5`} />
         </label>
         <label className="block">
           <span className="rotulo">Hasta</span>
           <input type="date" value={filtro.hasta} onChange={editar("hasta")}
-                 className={`cifra ${campo} mt-1`} />
+                 className={`cifra ${campo} mt-1.5`} />
         </label>
-        <Boton variante="contorno"
-               onClick={() => { setPagina(0); setFiltro({ usuario: "", accion: "", desde: "", hasta: "" }); }}>
-          Limpiar
-        </Boton>
+        {hayFiltro && (
+          <Boton variante="texto"
+                 onClick={() => { setPagina(0); setFiltro(SIN_FILTRO); }}>
+            Limpiar
+          </Boton>
+        )}
+        <span className="ml-auto self-center text-xs text-tinta-suave">
+          {entero(d?.filas.length ?? 0)} de {entero(total)} registros
+        </span>
       </div>
 
       {/* ------------------------------------------------------- tabla */}
