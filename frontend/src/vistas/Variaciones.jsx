@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useState } from "react";
 import { api, monto, entero, fecha } from "../api";
-import { Aviso } from "../comp/Piezas";
+import { Aviso, Punteo } from "../comp/Piezas";
 
 /** Convierte el desglose del residuo en el argumento redactado, con las
  * cuentas más grandes del grupo que sí importa (el que no llegó al umbral
@@ -44,7 +44,8 @@ export default function Variaciones({ encargoId }) {
   const [d, setD] = useState(null);
   const [fase, setFase] = useState(null);
   const [fases, setFases] = useState([]);
-  const [soloSig, setSoloSig] = useState(true);
+  const [seccion, setSeccion] = useState("MARCADAS");
+  const [evidencia, setEvidencia] = useState(null);
   const [error, setError] = useState(null);
   const [obs, setObs] = useState({});
   const [generando, setGenerando] = useState({});
@@ -134,6 +135,15 @@ export default function Variaciones({ encargoId }) {
     }
   }
 
+  async function verEvidencia(codigo) {
+    setEvidencia({ codigo, datos: null });
+    try {
+      setEvidencia({ codigo, datos: await api.evidenciaCuenta(encargoId, d.fase, codigo) });
+    } catch (err) {
+      setEvidencia({ codigo, datos: null, error: err.message });
+    }
+  }
+
   async function verHistorial(codigo = null) {
     setHistorial({ codigo, filas: null });
     try {
@@ -161,7 +171,10 @@ export default function Variaciones({ encargoId }) {
     );
   }
 
-  const filas = soloSig && d.aplica ? d.filas.filter((f) => f.significativa) : d.filas;
+  const filas =
+    seccion === "TODAS" ? d.filas
+    : seccion === "MARCADAS" ? d.filas.filter((f) => f.significativa)
+    : d.filas.filter((f) => f.motivo === seccion);
 
   return (
     <div className="space-y-6">
@@ -203,22 +216,51 @@ export default function Variaciones({ encargoId }) {
           <p className="cifra mt-1 text-lg">{d.umbral ? monto(d.umbral) : "—"}</p>
         </div>
         <div>
-          <p className="rotulo">Piso de ruido · {String(d.pct_trivialidad)}%</p>
+          <p className="rotulo">
+            Piso de ruido {d.aplica_trivialidad === false
+              ? "· desactivado"
+              : `· ${String(d.pct_trivialidad)}%`}
+          </p>
           <p className="cifra mt-1 text-lg">
-            {d.trivialidad ? monto(d.trivialidad) : "—"}
+            {d.aplica_trivialidad === false
+              ? "—"
+              : d.trivialidad ? monto(d.trivialidad) : "—"}
           </p>
         </div>
-        <label className="ml-auto flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={soloSig} disabled={!d.aplica}
-                 onChange={(e) => setSoloSig(e.target.checked)} />
-          {/* Filtra por `significativa`, que es cualquiera de los cinco
-              motivos -- no solo el de monto contra la materialidad. */}
-          Solo las marcadas para revisión
-        </label>
+        <div>
+          <p className="rotulo">
+            Variación {d.aplica_variacion === false ? "· desactivada" : ""}
+          </p>
+          <p className="cifra mt-1 text-lg">
+            {d.aplica_variacion === false ? "—" : `${String(d.pct_variacion)}%`}
+          </p>
+        </div>
         <button onClick={() => verHistorial(null)}
-                className="rotulo text-tinta-suave hover:text-tinta">
+                className="rotulo ml-auto text-tinta-suave hover:text-tinta">
           Histórico de análisis
         </button>
+      </div>
+
+      {/* --------------------------------------------- secciones por motivo */}
+      <div className="flex flex-wrap items-center gap-1 border-b border-regla pb-2">
+        {[
+          ["MARCADAS", "Para revisar", d.significativas],
+          ["Monto", "Monto", d.por_motivo?.Monto],
+          ["Comportamiento", "Comportamiento", d.por_motivo?.Comportamiento],
+          ["Cuenta nueva", "Nuevas", d.por_motivo?.["Cuenta nueva"]],
+          ["Cuenta cerrada", "Cerradas", d.por_motivo?.["Cuenta cerrada"]],
+          ["Naturaleza", "Naturaleza", d.por_motivo?.Naturaleza],
+          ["TODAS", "Todas", d.total_cuentas],
+        ].map(([id, texto, n]) => (
+          <button key={id} onClick={() => setSeccion(id)}
+                  className={`px-3 py-1 text-sm ${
+                    seccion === id
+                      ? "bg-tinta text-papel"
+                      : "text-tinta-suave hover:text-tinta"}`}>
+            {texto}
+            <span className="cifra ml-1.5 text-xs opacity-70">{entero(n ?? 0)}</span>
+          </button>
+        ))}
       </div>
 
       {/* ---------------------------------------------- control de alcance */}
@@ -363,19 +405,25 @@ export default function Variaciones({ encargoId }) {
                     {f.motivo ?? "—"}
                   </td>
                   <td className="px-3 py-2">
-                    {/* Sin `version` no hay análisis guardado: o nunca se
-                        generó, o el intento falló y hay que reintentar. */}
-                    {f.significativa && !obs[f.cuenta]?.version && (
-                      <button
-                        onClick={() => explicar(f.cuenta)}
-                        disabled={generando[f.cuenta]}
-                        className="rotulo text-tinta-suave hover:text-verde disabled:opacity-40"
-                      >
-                        {generando[f.cuenta]
-                          ? "Generando…"
-                          : obs[f.cuenta] ? "Reintentar" : "Explicar"}
+                    <div className="flex flex-col items-start gap-1">
+                      {/* Sin `version` no hay análisis guardado: o nunca se
+                          generó, o el intento falló y hay que reintentar. */}
+                      {f.significativa && !obs[f.cuenta]?.version && (
+                        <button
+                          onClick={() => explicar(f.cuenta)}
+                          disabled={generando[f.cuenta]}
+                          className="rotulo text-tinta-suave hover:text-verde disabled:opacity-40"
+                        >
+                          {generando[f.cuenta]
+                            ? "Generando…"
+                            : obs[f.cuenta] ? "Reintentar" : "Explicar"}
+                        </button>
+                      )}
+                      <button onClick={() => verEvidencia(f.cuenta)}
+                              className="rotulo text-tinta-suave hover:text-tinta">
+                        Evidencia
                       </button>
-                    )}
+                    </div>
                   </td>
                 </tr>
                 {obs[f.cuenta] && (
@@ -455,6 +503,168 @@ export default function Variaciones({ encargoId }) {
       {historial && (
         <Historial h={historial} onCerrar={() => setHistorial(null)} />
       )}
+
+      {evidencia && (
+        <Evidencia e={evidencia} onCerrar={() => setEvidencia(null)} />
+      )}
+    </div>
+  );
+}
+
+/** Los datos crudos detrás de una cuenta. Existe para poder contrastar lo
+ *  que afirma la IA contra lo que de verdad hay en los movimientos: el
+ *  texto generado es un punto de partida, no evidencia. */
+function Evidencia({ e, onCerrar }) {
+  const d = e.datos;
+  const c = d?.cuadre;
+
+  return (
+    <div className="fixed inset-0 z-20 flex justify-end bg-tinta/20" onClick={onCerrar}>
+      <div
+        className="h-full w-full max-w-3xl overflow-y-auto border-l border-regla bg-papel p-6"
+        onClick={(ev) => ev.stopPropagation()}
+      >
+        <div className="mb-6 flex items-start justify-between">
+          <div>
+            <p className="rotulo">Evidencia</p>
+            <p className="cifra mt-1 text-2xl">{e.codigo}</p>
+            {d?.nombre && <p className="text-sm text-tinta-media">{d.nombre}</p>}
+          </div>
+          <button onClick={onCerrar} className="rotulo hover:text-tinta">Cerrar ✕</button>
+        </div>
+
+        {e.error && <Aviso tono="error">{e.error}</Aviso>}
+        {!d && !e.error && <p className="text-sm text-tinta-suave">Cargando…</p>}
+
+        {d?.listo && (
+          <div className="space-y-8">
+            {/* ------------------------------------------------ el cuadre */}
+            {c ? (
+              <div className={`border-l-2 p-4 ${c.cuadra
+                ? "border-verde bg-verde-tenue" : "border-rojo bg-rojo-tenue"}`}>
+                <p className="rotulo mb-2 flex items-center gap-2">
+                  {c.cuadra && <Punteo tam={14} />}
+                  {c.cuadra
+                    ? `Los movimientos explican ${c.contra}`
+                    : `Los movimientos NO explican ${c.contra}`}
+                </p>
+                <div className="space-y-1 text-sm">
+                  <p>
+                    <span className="text-tinta-suave">Débitos</span>{" "}
+                    <span className="cifra">{c.debito}</span>
+                    <span className="text-tinta-suave"> − créditos </span>
+                    <span className="cifra">{c.credito}</span>
+                    <span className="text-tinta-suave"> = neto </span>
+                    <span className="cifra">{c.neto}</span>
+                  </p>
+                  <p>
+                    <span className="text-tinta-suave">Contra {c.contra}: </span>
+                    <span className="cifra">{c.esperado}</span>
+                    <span className="text-tinta-suave"> · diferencia </span>
+                    <span className={`cifra ${c.cuadra ? "" : "text-rojo"}`}>
+                      {c.diferencia}
+                    </span>
+                  </p>
+                  <p className="text-xs text-tinta-suave">
+                    {entero(c.movimientos)} movimientos del periodo.
+                    {c.cuadra
+                      ? " La cifra se reconstruye con los movimientos cargados."
+                      : " Revise antes de sostener cualquier explicación sobre esta cuenta."}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <Aviso tono="info">
+                Sin movimientos cargados para esta cuenta: no hay contra qué
+                contrastar la cifra. Cargue los movimientos del periodo en la
+                pestaña Archivos.
+              </Aviso>
+            )}
+
+            {/* ------------------------------------------- por auxiliar */}
+            {d.auxiliares?.length > 0 && (
+              <section>
+                <p className="rotulo mb-2">
+                  Composición · {d.auxiliares.length} auxiliares
+                </p>
+                <div className="border-t border-regla">
+                  {d.auxiliares.map((a) => (
+                    <div key={a.codigo}
+                         className="flex items-baseline gap-3 border-b border-regla-fina py-2 text-sm">
+                      <span className="cifra w-24 shrink-0 text-xs">{a.codigo}</span>
+                      <span className="min-w-0 flex-1 truncate" title={a.nombre}>
+                        {a.nombre}
+                      </span>
+                      <span className="cifra shrink-0">{a.variacion}</span>
+                      <span className="cifra w-16 shrink-0 text-right text-xs text-tinta-suave">
+                        {a.pct_de_la_variacion_total ?? "—"}%
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* --------------------------------------------- patrones */}
+            {d.patrones?.length > 0 && (
+              <section>
+                <p className="rotulo mb-2">
+                  Qué se movió · agrupado por descripción
+                </p>
+                <div className="border-t border-regla">
+                  {d.patrones.map((p, i) => (
+                    <div key={i}
+                         className="flex items-baseline gap-3 border-b border-regla-fina py-2 text-sm">
+                      <span className="cifra w-10 shrink-0 text-xs text-tinta-suave">
+                        {p.veces}×
+                      </span>
+                      <span className="min-w-0 flex-1 truncate" title={p.descripcion}>
+                        {p.descripcion ?? "—"}
+                      </span>
+                      <span className="cifra shrink-0">{monto(p.neto)}</span>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* ------------------------------------------ movimientos */}
+            {d.movimientos?.length > 0 && (
+              <section>
+                <p className="rotulo mb-2">
+                  Movimientos más grandes · {d.movimientos.length}
+                </p>
+                <div className="border-t border-regla">
+                  {d.movimientos.map((m, i) => (
+                    <div key={i} className="border-b border-regla-fina py-2 text-sm">
+                      <div className="flex items-baseline gap-3">
+                        <span className="cifra w-20 shrink-0 text-xs">{fecha(m.fecha)}</span>
+                        <span className="cifra w-24 shrink-0 truncate text-xs">
+                          {m.num_doc ?? "—"}
+                        </span>
+                        <span className="cifra w-24 shrink-0 text-xs text-tinta-suave">
+                          {m.codigo_puc}
+                        </span>
+                        <span className="cifra ml-auto shrink-0">
+                          {monto(Number(m.debito) - Number(m.credito))}
+                        </span>
+                      </div>
+                      <p className="mt-0.5 truncate text-xs text-tinta-suave">
+                        {m.tercero_nombre ? `${m.tercero_nombre} · ` : ""}
+                        {m.descripcion}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+                <p className="mt-2 text-xs text-tinta-suave">
+                  Se listan los de mayor magnitud. El cuadre de arriba sí
+                  considera la totalidad de los movimientos de la cuenta.
+                </p>
+              </section>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

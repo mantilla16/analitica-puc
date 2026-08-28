@@ -18,7 +18,10 @@ const AYUDA = {
 export default function Materialidad({ encargoId, onCambio }) {
   const [d, setD] = useState(null);
   const [borrador, setBorrador] = useState({});
-  const [param, setParam] = useState({ pct_variacion: "20", pct_trivialidad: "5" });
+  const [param, setParam] = useState({
+    pct_variacion: "20", pct_trivialidad: "5",
+    aplica_variacion: true, aplica_trivialidad: true,
+  });
   const [error, setError] = useState(null);
   const [guardado, setGuardado] = useState(null);
 
@@ -40,6 +43,8 @@ export default function Materialidad({ encargoId, onCambio }) {
       setParam({
         pct_variacion: String(r.pct_variacion ?? 20),
         pct_trivialidad: String(r.pct_trivialidad ?? 5),
+        aplica_variacion: r.aplica_variacion ?? true,
+        aplica_trivialidad: r.aplica_trivialidad ?? true,
       });
     } catch (e) { setError(e.message); }
   }
@@ -70,6 +75,8 @@ export default function Materialidad({ encargoId, onCambio }) {
     await api.guardarParametros(encargoId, {
       pct_variacion: Number(param.pct_variacion),
       pct_trivialidad: Number(param.pct_trivialidad),
+      aplica_variacion: param.aplica_variacion,
+      aplica_trivialidad: param.aplica_trivialidad,
     });
     await cargar();
     onCambio?.();
@@ -187,36 +194,68 @@ export default function Materialidad({ encargoId, onCambio }) {
           Aplican sobre la materialidad de la fase en curso.
         </p>
 
-        <div className="flex flex-wrap items-end gap-5">
-          <label className="block">
-            <span className="rotulo">Variación mínima</span>
-            <div className="mt-1 flex items-center gap-2">
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center gap-4">
+            <label className="flex w-52 items-center gap-2 text-sm">
+              <input type="checkbox" checked={param.aplica_variacion}
+                     onChange={(e) => setParam({ ...param, aplica_variacion: e.target.checked })} />
+              Variación porcentual
+            </label>
+            <div className="flex items-center gap-2">
               <input type="number" step="0.01" value={param.pct_variacion}
+                     disabled={!param.aplica_variacion}
                      onChange={(e) => setParam({ ...param, pct_variacion: e.target.value })}
-                     className="cifra w-24 border border-regla bg-papel px-3 py-2 text-sm" />
-              <span className="text-sm text-tinta-suave">%</span>
+                     className="cifra w-24 border border-regla bg-papel px-3 py-2 text-sm disabled:opacity-40" />
+              <span className="text-sm text-tinta-suave">
+                % en cualquier sentido, positivo o negativo
+              </span>
             </div>
-          </label>
+          </div>
 
-          <label className="block">
-            <span className="rotulo">Piso de ruido</span>
-            <div className="mt-1 flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-4">
+            <label className="flex w-52 items-center gap-2 text-sm">
+              <input type="checkbox" checked={param.aplica_trivialidad}
+                     onChange={(e) => setParam({ ...param, aplica_trivialidad: e.target.checked })} />
+              Piso de ruido
+            </label>
+            <div className="flex items-center gap-2">
               <input type="number" step="0.01" value={param.pct_trivialidad}
+                     disabled={!param.aplica_trivialidad}
                      onChange={(e) => setParam({ ...param, pct_trivialidad: e.target.value })}
-                     className="cifra w-24 border border-regla bg-papel px-3 py-2 text-sm" />
+                     className="cifra w-24 border border-regla bg-papel px-3 py-2 text-sm disabled:opacity-40" />
               <span className="text-sm text-tinta-suave">% de la materialidad</span>
             </div>
-          </label>
+          </div>
 
           <Boton variante="contorno" onClick={guardarParametros}>Guardar</Boton>
         </div>
 
-        <p className="mt-4 max-w-2xl text-xs leading-relaxed text-tinta-suave">
-          Una cuenta se marca si su variación supera la materialidad en pesos, o
-          si varía más del porcentaje indicado con un monto por encima del piso
-          de ruido. Sin ese piso, una cuenta que pasa de 2 a 10 millones aparece
-          como “+400%” y llena el informe de ruido.
-        </p>
+        <div className="mt-5 max-w-2xl space-y-2 text-xs leading-relaxed text-tinta-suave">
+          <p>
+            Una cuenta se marca si su variación supera la materialidad en pesos,
+            o por alguno de los criterios estructurales: apareció, desapareció,
+            o quedó con saldo contrario a su naturaleza.
+          </p>
+          <p>
+            <strong className="text-tinta-media">Variación porcentual</strong> agrega
+            las que se movieron más del porcentaje indicado, en cualquier sentido.
+            Apagarlo deja la selección apoyada solo en la materialidad y en los
+            criterios estructurales.
+          </p>
+          <p>
+            <strong className="text-tinta-media">Piso de ruido</strong> descarta lo
+            pequeño en esos criterios. Sin él, una cuenta que pasa de 2 a 10
+            millones entra como “+400%”. Apagarlo vuelve el criterio de porcentaje
+            absoluto: cualquier cuenta que cruce el porcentaje se reporta, sin
+            importar la cifra.
+          </p>
+          {!param.aplica_variacion && !param.aplica_trivialidad && (
+            <p className="text-ambar">
+              Con ambos apagados solo quedan la materialidad en pesos y los
+              criterios estructurales.
+            </p>
+          )}
+        </div>
       </div>
     </div>
   );

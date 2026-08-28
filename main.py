@@ -272,6 +272,8 @@ class MaterialidadEntrada(BaseModel):
 class Parametros(BaseModel):
     pct_variacion: Decimal = Field(default=Decimal("20"), ge=0)
     pct_trivialidad: Decimal = Field(default=Decimal("5"), ge=0)
+    aplica_variacion: bool = True
+    aplica_trivialidad: bool = True
 
 
 class LoteObservaciones(BaseModel):
@@ -364,7 +366,8 @@ def fijar_fase(encargo_id: str, fase: str) -> dict:
 
 @app.put("/encargos/{encargo_id}/parametros")
 def guardar_parametros(encargo_id: str, p: Parametros) -> dict:
-    db.guardar_parametros(encargo_id, p.pct_variacion, p.pct_trivialidad)
+    db.guardar_parametros(encargo_id, p.pct_variacion, p.pct_trivialidad,
+                          p.aplica_variacion, p.aplica_trivialidad)
     return db.parametros(encargo_id)
 
 
@@ -535,6 +538,14 @@ def ia_config() -> dict:
     nube que 12 núcleos de CPU."""
     import ia
     return ia.config()
+
+
+@app.get("/encargos/{encargo_id}/variaciones/{fase}/evidencia/{codigo}")
+def evidencia_cuenta(encargo_id: str, fase: str, codigo: str) -> dict:
+    """Los datos crudos detrás de una cuenta -- auxiliares, patrones,
+    movimientos y el cuadre de movimientos contra la cifra -- para poder
+    contrastar lo que afirma la IA."""
+    return A.evidencia_cuenta(encargo_id, fase, codigo)
 
 
 @app.get("/encargos/{encargo_id}/variaciones/{fase}/observaciones/guardadas")

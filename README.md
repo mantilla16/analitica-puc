@@ -55,9 +55,9 @@ psql -h localhost -U postgres -d auditoria_puc -v ON_ERROR_STOP=1 -f db/schema.s
 `08_materialidad.sql` (raíz) ya está incorporado en `db/schema.sql` --
 queda como registro histórico, no se vuelve a correr.
 
-**`10_observacion_ia.sql` y `11_usuarios.sql` todavía NO están en el dump**
-y hay que aplicarlos después, tanto en una base nueva como en una
-existente:
+**`10_observacion_ia.sql`, `11_usuarios.sql` y `12_criterios_opcionales.sql`
+todavía NO están en el dump** y hay que aplicarlos después, tanto en una
+base nueva como en una existente:
 
 ```bash
 psql -h localhost -U postgres -d auditoria_puc -v ON_ERROR_STOP=1 -f 10_observacion_ia.sql
@@ -65,6 +65,10 @@ psql -h localhost -U postgres -d auditoria_puc -v ON_ERROR_STOP=1 -f 10_observac
 
 ```bash
 psql -h localhost -U postgres -d auditoria_puc -v ON_ERROR_STOP=1 -f 11_usuarios.sql
+```
+
+```bash
+psql -h localhost -U postgres -d auditoria_puc -v ON_ERROR_STOP=1 -f 12_criterios_opcionales.sql
 ```
 
 Cuando se regenere `db/schema.sql` con un `pg_dump` nuevo, esa migración

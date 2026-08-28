@@ -139,8 +139,15 @@ def variaciones(encargo_id: str, fase: str | None = None) -> dict:
 
     aplica = bool(mat and mat.get("aplicar") and mat.get("valor"))
     umbral = Decimal(mat["valor"]) if aplica else None
+
+    # Los dos criterios se pueden apagar por encargo. Con el piso de ruido
+    # apagado vale 0, así que las comparaciones `>= trivial` dejan de
+    # filtrar y el criterio de porcentaje queda absoluto: cualquier
+    # variación que cruce el porcentaje se reporta, por pequeña que sea.
+    usa_var = par.get("aplica_variacion", True)
+    usa_triv = par.get("aplica_trivialidad", True)
     pct_triv = Decimal(par.get("pct_trivialidad") or 5)
-    trivial = (umbral * pct_triv / 100) if umbral else Decimal(0)
+    trivial = (umbral * pct_triv / 100) if (umbral and usa_triv) else Decimal(0)
     pct_var = Decimal(par.get("pct_variacion") or 20)
 
     act = _saldos_cuenta(act_id)
@@ -171,7 +178,8 @@ def variaciones(encargo_id: str, fase: str | None = None) -> dict:
                 motivo = "Cuenta nueva"
             elif sa == 0 and abs(sc) >= trivial:
                 motivo = "Cuenta cerrada"
-            elif pctv is not None and abs(pctv) >= pct_var and abs(var) >= trivial:
+            elif (usa_var and pctv is not None
+                  and abs(pctv) >= pct_var and abs(var) >= trivial):
                 motivo = "Comportamiento"
             elif sa < 0 and abs(sa) >= trivial:
                 motivo = "Naturaleza"
@@ -189,7 +197,10 @@ def variaciones(encargo_id: str, fase: str | None = None) -> dict:
             "significativa": motivo is not None,
         })
 
-    filas.sort(key=lambda f: abs(f["variacion"]), reverse=True)
+    # Orden por código PUC: es como se recorre un balance y como se revisa
+    # una cédula. Antes iba por variación descendente, que servía para
+    # "lo más grande primero" pero desordenaba la lectura contable.
+    filas.sort(key=lambda f: f["cuenta"])
     no_significativas = [f for f in filas if not f["significativa"]]
     residuo = sum(abs(f["variacion"]) for f in no_significativas)
 
@@ -203,8 +214,15 @@ def variaciones(encargo_id: str, fase: str | None = None) -> dict:
         "trivialidad": trivial,
         "pct_variacion": pct_var,
         "pct_trivialidad": pct_triv,
+        "aplica_variacion": usa_var,
+        "aplica_trivialidad": usa_triv,
         "total_cuentas": len(filas),
         "significativas": sum(1 for f in filas if f["significativa"]),
+        "por_motivo": {
+            m: sum(1 for f in filas if f["motivo"] == m)
+            for m in ("Monto", "Comportamiento", "Cuenta nueva",
+                      "Cuenta cerrada", "Naturaleza")
+        },
         "residuo_no_seleccionado": residuo,
         "residuo_supera_umbral": bool(umbral and residuo > umbral),
         "desglose_no_seleccionado": (
@@ -419,6 +437,114 @@ def _generar_y_guardar(d: dict, encargo_id: str, cliente_id: str, fase: str,
         cifras=r["cifras_no_verificadas"], entrada=entrada,
         instruccion=instruccion, modelo=ia.modelo_actual(), usuario=usuario,
     )
+
+
+def evidencia_cuenta(encargo_id: str, fase: str, codigo: str) -> dict:
+    """Los datos crudos detrás de una cuenta, para contrastar lo que
+    afirma la IA: en qué auxiliares está el cambio, qué se movió y --
+    lo más importante -- si la suma de los movimientos realmente explica
+    la variación.
+
+    Ese cuadre es el control que faltaba: si los movimientos del periodo
+    no reconstruyen la diferencia entre los dos saldos, entonces ninguna
+    narrativa sobre esa cuenta se sostiene, la haya escrito un modelo o
+    una persona.
+    """
+    d = variaciones(encargo_id, fase)
+    if not d["listo"]:
+        return {"listo": False, "faltan": d["faltan"]}
+    fila = next((f for f in d["filas"] if f["cuenta"] == codigo), None)
+    if fila is None:
+        return {"listo": False, "faltan": []}
+
+    act_id = carga_de(encargo_id, "BAL_ACTUAL")
+    comparativo_id = (carga_de(encargo_id, "BAL_CIERRE_ANTERIOR") if fila["clase"] <= "3"
+                      else carga_de(encargo_id, "BAL_CORTE_ANTERIOR"))
+    mov_id = carga_de(encargo_id, "MOV_ACTUAL")
+
+    signo = (db.uno(
+        """SELECT signo FROM core.balance
+           WHERE carga_id=%s AND codigo_puc=%s AND nivel='Cuenta'""",
+        (act_id, codigo),
+    ) or {}).get("signo", 1)
+
+    movimientos, patrones, totales = [], [], None
+    if mov_id:
+        patrones = db.varios(
+            """SELECT descripcion, count(*) AS veces,
+                      sum(debito::numeric)  AS debito,
+                      sum(credito::numeric) AS credito,
+                      sum(debito::numeric - credito::numeric) AS neto
+               FROM raw.movimiento_staging
+               WHERE carga_id=%s AND left(codigo_puc,%s)=%s
+               GROUP BY descripcion
+               ORDER BY abs(sum(debito::numeric - credito::numeric)) DESC
+               LIMIT 40""",
+            (mov_id, len(codigo), codigo),
+        )
+        movimientos = db.varios(
+            """SELECT fecha, num_doc, secuencia, codigo_puc, tercero_nit,
+                      tercero_nombre, descripcion,
+                      debito::numeric AS debito, credito::numeric AS credito
+               FROM raw.movimiento_staging
+               WHERE carga_id=%s AND left(codigo_puc,%s)=%s
+               ORDER BY abs(debito::numeric - credito::numeric) DESC
+               LIMIT 100""",
+            (mov_id, len(codigo), codigo),
+        )
+        totales = db.uno(
+            """SELECT count(*) AS n,
+                      coalesce(sum(debito::numeric),0)  AS debito,
+                      coalesce(sum(credito::numeric),0) AS credito
+               FROM raw.movimiento_staging
+               WHERE carga_id=%s AND left(codigo_puc,%s)=%s""",
+            (mov_id, len(codigo), codigo),
+        )
+
+    return {
+        "listo": True,
+        "cuenta": codigo,
+        "nombre": fila["nombre"],
+        "fila": fila,
+        "auxiliares": _auxiliares_variacion(act_id, comparativo_id, codigo,
+                                            fila["variacion"], limite=50),
+        "patrones": patrones,
+        "movimientos": movimientos,
+        "cuadre": _cuadre_movimientos(fila, totales, signo),
+    }
+
+
+def _cuadre_movimientos(fila: dict, totales: dict | None, signo: int) -> dict | None:
+    """¿Los movimientos del periodo explican la cifra que se está mirando?
+
+    Depende de la clase, y no por capricho:
+      · Clases 1-3 se comparan contra el cierre de diciembre, que es el
+        saldo inicial del periodo. Entonces débitos menos créditos debe
+        reproducir la VARIACIÓN.
+      · Clases 4-7 arrancan el año en cero y se comparan contra el mismo
+        corte del año pasado. Los movimientos del año en curso explican
+        el SALDO ACTUAL, no la diferencia contra el año anterior.
+    """
+    if not totales or not totales.get("n"):
+        return None
+
+    neto = (Decimal(totales["debito"]) - Decimal(totales["credito"])) * signo
+    if fila["clase"] <= "3":
+        contra, esperado = "la variación", Decimal(fila["variacion"])
+    else:
+        contra, esperado = "el saldo actual", Decimal(fila["saldo_actual"])
+
+    dif = (neto - esperado).quantize(Decimal("0.01"))
+    return {
+        "movimientos": totales["n"],
+        "debito": _cop(totales["debito"]),
+        "credito": _cop(totales["credito"]),
+        "neto": _cop(neto),
+        "contra": contra,
+        "esperado": _cop(esperado),
+        "diferencia": _cop(dif),
+        "cuadra": dif == 0,
+    }
 
 
 def observaciones_guardadas(encargo_id: str, fase: str) -> list[dict]:

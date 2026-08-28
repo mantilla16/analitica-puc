@@ -199,14 +199,20 @@ def fijar_fase(encargo_id: str, fase: str) -> None:
 
 def parametros(encargo_id: str) -> dict:
     return uno(
-        """SELECT fase_activa, pct_variacion, pct_trivialidad
+        """SELECT fase_activa, pct_variacion, pct_trivialidad,
+                  aplica_variacion, aplica_trivialidad
            FROM core.encargo WHERE id=%s""", (encargo_id,)) or {}
 
 
-def guardar_parametros(encargo_id: str, pct_variacion, pct_trivialidad) -> None:
+def guardar_parametros(encargo_id: str, pct_variacion, pct_trivialidad,
+                       aplica_variacion: bool, aplica_trivialidad: bool) -> None:
     ejecutar(
-        "UPDATE core.encargo SET pct_variacion=%s, pct_trivialidad=%s WHERE id=%s",
-        (pct_variacion, pct_trivialidad, encargo_id))
+        """UPDATE core.encargo
+              SET pct_variacion=%s, pct_trivialidad=%s,
+                  aplica_variacion=%s, aplica_trivialidad=%s
+            WHERE id=%s""",
+        (pct_variacion, pct_trivialidad, aplica_variacion,
+         aplica_trivialidad, encargo_id))
 
 
 def encargo(encargo_id: str) -> dict | None:
