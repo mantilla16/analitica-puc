@@ -28,6 +28,57 @@ function Seccion({ n, titulo, nota, children }) {
   );
 }
 
+/* Nombres legibles de los insumos, para no mostrar la constante interna
+   en un documento que lee un tercero. */
+const INSUMO = {
+  BAL_ACTUAL: "Balance a la fecha de corte",
+  BAL_CIERRE_ANTERIOR: "Balance al 31-dic del año anterior",
+  BAL_CORTE_ANTERIOR: "Balance al mismo corte del año anterior",
+};
+
+/** Las cuentas concretas detrás de un control que falló. Sin esto el
+ *  papel dice "falló" y deja al auditor buscando a ciegas dónde. */
+function DetalleFalla({ c }) {
+  // G02: descuadres de línea, agrupados por balance
+  const porBalance = Object.entries(c.cifras ?? {})
+    .filter(([, v]) => Array.isArray(v) && v.length && v[0]?.codigo);
+  // G03: cuentas donde los movimientos no reproducen la cifra
+  const noCuadran = c.cifras?.no_cuadran ?? [];
+
+  if (!porBalance.length && !noCuadran.length) return null;
+
+  return (
+    <div className="mt-2 rounded-[8px] bg-rojo-tenue p-3">
+      {porBalance.map(([tipo, filas]) => (
+        <div key={tipo} className="mb-2 last:mb-0">
+          <p className="rotulo text-rojo">{INSUMO[tipo] ?? tipo}</p>
+          {filas.map((f) => (
+            <p key={f.codigo} className="mt-1 flex flex-wrap items-baseline gap-2 text-xs">
+              <span className="cifra font-semibold">{f.codigo}</span>
+              <span className="text-tinta-media">{f.nombre}</span>
+              <span className="cifra ml-auto text-rojo">{f.diferencia}</span>
+            </p>
+          ))}
+        </div>
+      ))}
+
+      {noCuadran.map((f) => (
+        <p key={f.cuenta} className="mt-1 text-xs">
+          <span className="cifra font-semibold">{f.cuenta}</span>{" "}
+          <span className="text-tinta-media">{f.nombre}</span>
+          {" · "}
+          <span className="text-tinta-suave">movimientos </span>
+          <span className="cifra">{f.neto_movimientos}</span>
+          <span className="text-tinta-suave"> contra {f.contra} </span>
+          <span className="cifra">{f.esperado}</span>
+          <span className="text-tinta-suave"> · diferencia </span>
+          <span className="cifra text-rojo">{f.diferencia}</span>
+        </p>
+      ))}
+    </div>
+  );
+}
+
 /** Un control con su marca, su estado y contra qué se contrastó. */
 function Control({ c }) {
   return (
@@ -41,6 +92,7 @@ function Control({ c }) {
           {!c.es_evidencia && <Chip tono="gris">no es evidencia</Chip>}
         </p>
         <p className="mt-1 text-xs leading-relaxed text-tinta-media">{c.detalle}</p>
+        {c.estado === "FALLA" && <DetalleFalla c={c} />}
       </div>
     </div>
   );

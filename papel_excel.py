@@ -207,6 +207,39 @@ def construir(p: dict) -> bytes:
             h.cell(row=i, column=4).fill = PatternFill("solid", fgColor=tono)
         h.cell(row=i, column=6).alignment = Alignment(wrap_text=True, vertical="top")
 
+    # ------------------------------------------------ 3.b descuadres
+    # Los controles que fallaron, cuenta por cuenta. Una hoja que diga
+    # "falló" sin decir dónde obliga a salir del papel a buscarlo.
+    INSUMO = {"BAL_ACTUAL": "Balance a la fecha de corte",
+              "BAL_CIERRE_ANTERIOR": "Balance al 31-dic del año anterior",
+              "BAL_CORTE_ANTERIOR": "Balance al mismo corte del año anterior"}
+    detalle = []
+    for c in p["gates"]:
+        if c["estado"] != "FALLA":
+            continue
+        for tipo, filas in (c.get("cifras") or {}).items():
+            if isinstance(filas, list) and filas and isinstance(filas[0], dict):
+                for f in filas:
+                    if "codigo" in f:          # descuadre de línea
+                        detalle.append([c["codigo"], INSUMO.get(tipo, tipo),
+                                        f["codigo"], f["nombre"],
+                                        "saldo inicial + débitos − créditos ≠ saldo final",
+                                        _num(f["diferencia"])])
+                    elif "cuenta" in f:        # movimientos que no reproducen
+                        detalle.append([c["codigo"], "Movimientos del periodo",
+                                        f["cuenta"], f["nombre"],
+                                        f"neto {f['neto_movimientos']} contra "
+                                        f"{f['contra']} {f['esperado']}",
+                                        _num(f["diferencia"])])
+    if detalle:
+        h = _hoja(wb, "Descuadres", "Descuadres detectados",
+                  "Las cuentas concretas detrás de cada control que falló. "
+                  "Es por donde empieza la revisión.")
+        _tabla(h, 4, ["Control", "Fuente", "Cuenta", "Nombre", "Qué no cuadra",
+                      "Diferencia"],
+               detalle, anchos=[10, 34, 12, 40, 62, 20],
+               formatos={6: PESOS}, principal=True)
+
     # ------------------------------------------- 4. cédula sumaria
     h = _hoja(wb, "Cédula sumaria", "Cédula sumaria — saldos por clase",
               "Saldo en naturaleza al corte, a nivel de cuenta.")
