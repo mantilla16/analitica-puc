@@ -11,16 +11,45 @@ export function Punteo({ tam = 18 }) {
   );
 }
 
-export function Boton({ children, variante = "principal", ...props }) {
+export function Boton({ children, variante = "principal", className = "", ...props }) {
   const estilos = {
     principal: "btn-principal",
     contorno: "btn-contorno",
     texto: "btn-texto",
   };
+  // La clase que llegue se suma, no reemplaza: si se dejara pasar por
+  // props, React se quedaría solo con ella y el botón perdería su estilo.
   return (
-    <button className={`btn ${estilos[variante]}`} {...props}>
+    <button className={`btn ${estilos[variante]} ${className}`} {...props}>
       {children}
     </button>
+  );
+}
+
+/** El anillo del logotipo, dibujado. Cuatro arcos con los colores de la
+ *  marca; se usa como elemento gráfico, no como logo oficial. */
+export function Anillo({ tam = 320, grosor = 10, className = "" }) {
+  const r = 100;
+  const c = 2 * Math.PI * r;              // 628.3
+  const tramo = c / 4 - 8;                // deja un respiro entre arcos
+  const arcos = [
+    ["var(--color-cian)", 0],
+    ["var(--color-naranja)", -c / 4],
+    ["var(--color-cian)", -c / 2],
+    ["var(--color-morado)", (-c * 3) / 4],
+  ];
+  return (
+    <svg viewBox="0 0 240 240" width={tam} height={tam} className={className}
+         fill="none" aria-hidden="true">
+      <g transform="rotate(-90 120 120)">
+        {arcos.map(([color, desfase], i) => (
+          <circle key={i} cx="120" cy="120" r={r} stroke={color}
+                  strokeWidth={grosor} strokeLinecap="round"
+                  strokeDasharray={`${tramo} ${c - tramo}`}
+                  strokeDashoffset={desfase} />
+        ))}
+      </g>
+    </svg>
   );
 }
 

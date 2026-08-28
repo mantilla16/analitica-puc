@@ -70,6 +70,22 @@
   --radio-chico: 8px;
 }
 
+/* ------------------------------------------------------------ ingreso */
+/* Fondo del panel de marca: navy profundo con dos focos de luz en cian y
+   morado, los mismos del anillo. El degradado va en diagonal para que la
+   pantalla no se lea como una banda plana. */
+.marca-fondo {
+  background:
+    radial-gradient(700px 500px at 12% 12%, rgb(0 188 228 / 0.24), transparent 62%),
+    radial-gradient(600px 500px at 88% 82%, rgb(146 39 143 / 0.28), transparent 62%),
+    linear-gradient(155deg, #262573 0%, #1b1a5e 45%, #0e0e33 100%);
+}
+
+/* Giro muy lento del anillo decorativo. La consulta de movimiento
+   reducida que está más abajo lo detiene. */
+@keyframes girar { to { transform: rotate(360deg); } }
+.anillo-lento { animation: girar 120s linear infinite; transform-origin: 50% 50%; }
+
 /* La cinta del anillo del logo, en el borde superior de la aplicación */
 .cinta-marca {
   height: 3px;
