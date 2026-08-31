@@ -35,6 +35,35 @@ TABLAS = {
 }
 
 
+def _escribir(tabla: str, cambios: list[tuple]) -> None:
+    """Las huellas nuevas, en un solo UPDATE.
+
+    Un UPDATE por fila no sirve aquí: el índice de staging es por carga_id, y
+    como una carga ES toda la tabla, cada uno termina recorriendo el archivo
+    completo. Con 122.795 movimientos eso es cuadrático y no termina nunca.
+
+    Se cargan las huellas a una tabla temporal con COPY y se aplica un único
+    UPDATE ... FROM: una pasada, unión por hash, sin depender de índices.
+    """
+    with db.conn() as c:
+        with c.cursor() as cur:
+            cur.execute("""CREATE TEMP TABLE huella_nueva (
+                             huella text, carga_id uuid, hoja text,
+                             fila_origen integer) ON COMMIT DROP""")
+            with cur.copy("COPY huella_nueva FROM STDIN") as cp:
+                for fila in cambios:
+                    cp.write_row(fila)
+            cur.execute(f"""
+                UPDATE {tabla} t SET huella = n.huella
+                  FROM huella_nueva n
+                 WHERE t.carga_id = n.carga_id
+                   AND t.fila_origen = n.fila_origen
+                   AND t.hoja IS NOT DISTINCT FROM n.hoja""")
+            escritas = cur.rowcount
+        c.commit()
+    print(f"    escritas {escritas}")
+
+
 def main(aplicar: bool) -> None:
     total_rev = total_cam = 0
 
@@ -56,14 +85,7 @@ def main(aplicar: bool) -> None:
             print(f"  {str(cid)[:8]}  {len(filas):>7} filas  {marca}")
 
             if cambios and aplicar:
-                with db.conn() as c:
-                    with c.cursor() as cur:
-                        cur.executemany(
-                            f"UPDATE {tabla} SET huella=%s WHERE carga_id=%s "
-                            f"AND hoja IS NOT DISTINCT FROM %s AND fila_origen=%s",
-                            cambios,
-                        )
-                    c.commit()
+                _escribir(tabla, cambios)
 
     print(f"\n{total_rev} filas revisadas, {total_cam} huellas distintas.")
     if not total_cam:
