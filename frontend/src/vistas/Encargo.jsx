@@ -175,10 +175,19 @@ export default function Encargo({ encargoId, onVolver }) {
 
               {i.cargado ? (
                 <span className="cifra text-xs text-tinta-suave">
-                  {entero(i.filas_cargadas)} filas
+                  {entero(i.tipo.startsWith("BAL")
+                    ? i.filas_en_balance : i.filas_cargadas)} filas
                 </span>
               ) : null}
 
+              {/* Un balance leído pero sin promover no aporta una sola cifra
+                  al análisis. Antes solo se notaba por ausencia: la tarjeta
+                  no mostraba conteo de filas y nada más. */}
+              {i.cargado && i.tipo.startsWith("BAL") && !i.filas_en_balance && (
+                <span title="El archivo se leyó pero sus filas no llegaron al balance: vuelva a subirlo">
+                  <Chip tono="rojo">sin promover</Chip>
+                </span>
+              )}
               {i.n_hallazgos > 0 && (
                 <button
                   onClick={() => setVerHallazgos(verHallazgos === i.tipo ? null : i.tipo)}

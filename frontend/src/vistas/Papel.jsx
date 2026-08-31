@@ -118,9 +118,16 @@ export default function Papel({ encargoId, fase }) {
       cuenta seleccionada.
     </p>
   );
-  if (!p.listo) return (
-    <Aviso tono="info" titulo="No hay con qué armar el papel">{p.motivo}</Aviso>
-  );
+  if (!p.listo) {
+    const sinPromover = p.sin_promover?.length > 0;
+    return (
+      <Aviso tono={sinPromover ? "error" : "info"}
+             titulo={sinPromover ? "Un balance quedó sin promover"
+                                 : "No hay con qué armar el papel"}>
+        {p.motivo}
+      </Aviso>
+    );
+  }
 
   const id = p.identificacion;
   const d = p.comparativo;

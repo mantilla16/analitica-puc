@@ -131,7 +131,8 @@ def variaciones(encargo_id: str, fase: str | None = None) -> dict:
                              ("BAL_CIERRE_ANTERIOR", cie_id),
                              ("BAL_CORTE_ANTERIOR", cor_id)) if not c]
     if faltan:
-        return {"listo": False, "faltan": faltan, "filas": []}
+        return {"listo": False, "faltan": faltan, "sin_promover": [],
+                "filas": []}
 
     par = db.parametros(encargo_id)
     fase = fase or par.get("fase_activa") or "PLANEACION"
@@ -153,6 +154,23 @@ def variaciones(encargo_id: str, fase: str | None = None) -> dict:
     act = _saldos_cuenta(act_id)
     cie = _saldos_cuenta(cie_id)
     cor = _saldos_cuenta(cor_id)
+
+    # Una carga puede existir y estar apuntada por el checklist sin haberse
+    # promovido nunca: queda en staging y `core.balance` no tiene una sola
+    # fila suya. Si se deja pasar, sus saldos entran al comparativo como
+    # cero y el resultado sale completo, coherente y falso -- toda variación
+    # termina siendo el saldo del comparativo con el signo cambiado, y los
+    # controles internos lo aprueban porque cero cuadra con cero.
+    #
+    # Es el error silencioso más caro que puede dar este módulo, así que no
+    # se calcula sobre datos que no están: se detiene y se dice cuál falta.
+    sin_promover = [t for t, s in (("BAL_ACTUAL", act),
+                                   ("BAL_CIERRE_ANTERIOR", cie),
+                                   ("BAL_CORTE_ANTERIOR", cor)) if not s]
+    if sin_promover:
+        return {"listo": False, "faltan": sin_promover,
+                "sin_promover": sin_promover, "filas": []}
+
     nombres = db.nombres_puc()
 
     filas = []

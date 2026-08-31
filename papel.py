@@ -155,7 +155,15 @@ def _contrato_datos(encargo_id: str) -> list[dict]:
             "perfil_version": (perfil or {}).get("version"),
             "periodo": {"inicio": c["periodo_ini"], "fin": c["periodo_fin"]},
             "filas_leidas": c["filas_staging"],
-            "filas_promovidas": c["filas_cargadas"],
+            # Cargado no es lo mismo que promovido: una carga puede quedarse
+            # en staging y nunca llegar a core.balance. Se cuenta contra la
+            # tabla en vez de leer `filas_cargadas`, que es lo que alguien
+            # anotó al promover -- y aquí hace falta saber qué hay, no qué
+            # se dijo que había.
+            "filas_promovidas": (
+                db.uno("SELECT count(*) AS n FROM core.balance WHERE carga_id=%s",
+                       (i["carga_id"],))["n"]
+                if i["tipo"].startswith("BAL") else c["filas_cargadas"]),
             "estado": c["estado"],
             "subido_por": c["subido_por"],
             "fecha_carga": c["fecha_carga"],
@@ -175,11 +183,25 @@ def _controles_previos(enc: dict, contrato: list[dict]) -> list[dict]:
     # -- misma entidad
     faltan = [c["insumo"] for c in contrato
               if c["requerido"] and not c.get("cargado")]
+    # Un balance cargado pero sin promover tiene cero filas en core.balance:
+    # el análisis lo leería como saldos en cero y el comparativo saldría
+    # coherente y falso. Tener el archivo no es tenerlo cargado.
+    vacios = [c["insumo"] for c in contrato
+              if c.get("cargado") and c.get("filas_promovidas") == 0]
+    if faltan:
+        detalle = (f"Faltan: {', '.join(faltan)}. Sin ellos el comparativo "
+                   "no se puede armar.")
+    elif vacios:
+        detalle = (f"{', '.join(vacios)}: el archivo está cargado pero ninguna "
+                   "de sus filas llegó al balance. Quedó en staging sin "
+                   "promover, así que sus saldos entrarían al comparativo "
+                   "como cero.")
+    else:
+        detalle = "Todos los insumos requeridos están cargados y promovidos."
     ctrl.append(_control(
         "P01", "✓", "Insumos requeridos completos",
-        "OK" if not faltan else "BLOQUEANTE",
-        "Todos los insumos requeridos están cargados." if not faltan
-        else f"Faltan: {', '.join(faltan)}. Sin ellos el comparativo no se puede armar.",
+        "OK" if not (faltan or vacios) else "BLOQUEANTE", detalle,
+        cifras={"faltan": faltan, "sin_promover": vacios} if (faltan or vacios) else None,
     ))
 
     # -- periodos: que cada balance sea del periodo que dice ser
@@ -438,8 +460,17 @@ def papel_trabajo(encargo_id: str, fase: str | None = None) -> dict:
 
     d = A.variaciones(encargo_id, fase)
     if not d["listo"]:
-        return {"listo": False, "motivo": "Faltan balances para comparar.",
-                "faltan": d["faltan"]}
+        sin_promover = d.get("sin_promover") or []
+        return {
+            "listo": False,
+            "motivo": (
+                "Hay balances cargados que nunca se promovieron: sus filas "
+                "están en staging y no en el balance, así que sus saldos "
+                "entrarían al comparativo como cero."
+                if sin_promover else "Faltan balances para comparar."),
+            "faltan": d["faltan"],
+            "sin_promover": sin_promover,
+        }
 
     contrato = _contrato_datos(encargo_id)
     previos = _controles_previos(enc, contrato)

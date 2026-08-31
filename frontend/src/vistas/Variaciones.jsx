@@ -163,6 +163,20 @@ export default function Variaciones({ encargoId }) {
       BAL_CIERRE_ANTERIOR: "el balance a 31 de diciembre del año anterior",
       BAL_CORTE_ANTERIOR: "el balance al mismo corte del año anterior",
     };
+    // Cargado sin promover es un caso distinto de no cargado, y el remedio
+    // también: el archivo ya está, lo que falta es llevarlo al balance.
+    if (d.sin_promover?.length) {
+      return (
+        <Aviso tono="error" titulo="Un balance quedó sin promover">
+          {d.sin_promover.map((f) => nombres[f]).join(" y ")} está cargado pero
+          ninguna de sus filas llegó al balance: se quedó en el archivo leído.
+          Vuelva a la pestaña Archivos y súbalo de nuevo. No se calcula el
+          comparativo mientras eso pase, porque los saldos que faltan entrarían
+          como cero y toda variación saldría siendo el saldo del año anterior
+          con el signo cambiado.
+        </Aviso>
+      );
+    }
     return (
       <Aviso tono="info" titulo="Faltan balances para comparar">
         Cargue {d.faltan.map((f) => nombres[f]).join(" y ")} en la pestaña
