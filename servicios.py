@@ -337,7 +337,8 @@ def promover_balance(carga_id: str) -> dict:
     estado = "CON_HALLAZGOS" if hay_bloqueantes else "VALIDADA"
     db.actualizar_carga(carga_id, filas_cargadas=n, estado=estado)
 
-    for m in lineas[:50]:
+    TOPE = 50   # el detalle se acota para no inundar la tabla de hallazgos
+    for m in lineas[:TOPE]:
         db.crear_hallazgo(
             encargo_id=c["encargo_id"], carga_id=carga_id,
             tipo="DESCUADRE_LINEA", severidad="BLOQUEANTE",
@@ -345,6 +346,18 @@ def promover_balance(carga_id: str) -> dict:
             descripcion="saldo_inicial + debito - credito <> saldo_final",
             fila_origen=m["fila_origen"],
         )
+    # Un tope que no se declara se lee como "esos son todos": el auditor
+    # revisa 50 cuentas creyendo que agotó el problema. Se deja constancia.
+    if len(lineas) > TOPE:
+        db.crear_hallazgo(
+            encargo_id=c["encargo_id"], carga_id=carga_id,
+            tipo="DETALLE_TRUNCADO", severidad="INFORMATIVO",
+            descripcion=(f"Hay {len(lineas)} cuentas descuadradas; el detalle "
+                         f"solo lista las primeras {TOPE}. Las restantes "
+                         f"{len(lineas) - TOPE} existen pero no se enumeran "
+                         f"aquí: revise el balance completo."),
+        )
+
     for q in cuadre:
         if q["estado"] == "DESCUADRE":
             db.crear_hallazgo(

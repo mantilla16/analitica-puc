@@ -260,7 +260,9 @@ def checklist(encargo_id: str) -> list[dict]:
     return varios(
         """SELECT i.orden, i.tipo, i.nombre AS insumo, i.requerido,
                   (c.id IS NOT NULL) AS cargado,
-                  c.id AS carga_id, c.archivo, c.estado, c.filas_cargadas
+                  c.id AS carga_id, c.archivo, c.estado, c.filas_cargadas,
+                  (SELECT count(*) FROM core.hallazgo h WHERE h.carga_id=c.id)
+                    AS n_hallazgos
            FROM core.insumo i
            LEFT JOIN core.encargo_insumo ei
                   ON ei.tipo=i.tipo AND ei.encargo_id=%s
@@ -564,6 +566,37 @@ def crear_hallazgo(**d: Any) -> None:
     ph = ", ".join(["%s"] * len(cols))
     ejecutar(f"INSERT INTO core.hallazgo ({', '.join(cols)}) VALUES ({ph})",
              tuple(d.values()))
+
+
+def hallazgos_detalle(carga_id: str) -> list[dict]:
+    """Los hallazgos con el nombre y las cifras de la cuenta al lado.
+
+    Sin esto el hallazgo dice que la línea no cuadra pero no con qué
+    números, y el auditor tiene que ir a buscarlos al balance a mano --
+    que es justo el trabajo que la herramienta debería ahorrarle.
+
+    El balance promovido no guarda `fila_origen`, así que la unión va por
+    código; el DISTINCT ON evita que un código repetido en el archivo
+    multiplique el hallazgo en la respuesta.
+    """
+    return varios(
+        """SELECT h.id, h.tipo, h.severidad, h.codigo_puc, h.monto,
+                  h.descripcion, h.fila_origen, h.detectado_en,
+                  b.nombre_cuenta, b.saldo_inicial, b.debito, b.credito,
+                  b.saldo_final
+           FROM core.hallazgo h
+           LEFT JOIN (
+               SELECT DISTINCT ON (codigo_puc)
+                      codigo_puc, nombre_cuenta, saldo_inicial,
+                      debito, credito, saldo_final
+                 FROM core.balance
+                WHERE carga_id=%s
+                ORDER BY codigo_puc
+           ) b ON b.codigo_puc = h.codigo_puc
+          WHERE h.carga_id=%s
+          ORDER BY h.severidad, h.codigo_puc NULLS FIRST, h.id""",
+        (carga_id, carga_id),
+    )
 
 
 def hallazgos(carga_id: str) -> list[dict]:

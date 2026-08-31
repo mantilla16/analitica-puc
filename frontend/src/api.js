@@ -62,6 +62,7 @@ export const api = {
   promover: (cargaId) => pedir(`/cargas/${cargaId}/promover`, { method: "POST" }),
   carga: (cargaId) => pedir(`/cargas/${cargaId}`),
   evidencia: (cotejoId) => pedir(`/cotejos/${cotejoId}/evidencia?limite=100`),
+  hallazgos: (cargaId) => pedir(`/cargas/${cargaId}/hallazgos`),
 
   fases: () => pedir("/fases"),
   materialidades: (id) => pedir(`/encargos/${id}/materialidades`),

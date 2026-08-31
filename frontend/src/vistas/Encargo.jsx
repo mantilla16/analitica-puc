@@ -25,6 +25,7 @@ export default function Encargo({ encargoId, onVolver }) {
   const [ocupado, setOcupado] = useState(false);
   const [error, setError] = useState(null);
   const [pestana, setPestana] = useState("archivos");
+  const [verHallazgos, setVerHallazgos] = useState(null);   // tipo de insumo
 
   const refrescar = useCallback(async () => {
     setEnc(await api.encargo(encargoId));
@@ -154,8 +155,9 @@ export default function Encargo({ encargoId, onVolver }) {
         <div className="space-y-2">
           {items.map((i) => (
             <div key={i.tipo}
-                 className={`panel tarjeta-activa flex items-center gap-4 px-4 py-3.5 ${
+                 className={`panel ${verHallazgos === i.tipo ? "" : "tarjeta-activa"} ${
                    i.cargado ? "" : "panel-punteado"}`}>
+            <div className="flex items-center gap-4 px-4 py-3.5">
               <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
                 i.cargado ? "bg-verde-tenue" : "bg-papel-hondo"}`}>
                 {i.cargado ? <Punteo tam={16} /> : (
@@ -177,10 +179,19 @@ export default function Encargo({ encargoId, onVolver }) {
                 </span>
               ) : null}
 
-              {i.estado === "CON_HALLAZGOS" && (
-                <span title="La carga se promovió, pero quedaron descuadres sin resolver">
-                  <Chip tono="ambar">con hallazgos</Chip>
-                </span>
+              {i.n_hallazgos > 0 && (
+                <button
+                  onClick={() => setVerHallazgos(verHallazgos === i.tipo ? null : i.tipo)}
+                  title="Ver qué se detectó"
+                  className="shrink-0"
+                >
+                  <Chip tono={i.estado === "RECHAZADA" ? "rojo" : "ambar"}>
+                    {entero(i.n_hallazgos)}{" "}
+                    {i.n_hallazgos === 1 ? "hallazgo" : "hallazgos"}
+                    <span className={`transition-transform ${
+                      verHallazgos === i.tipo ? "rotate-180" : ""}`}>▾</span>
+                  </Chip>
+                </button>
               )}
               {i.estado === "RECHAZADA" && <Chip tono="rojo">rechazada</Chip>}
 
@@ -191,6 +202,9 @@ export default function Encargo({ encargoId, onVolver }) {
                   onChange={(e) => e.target.files[0] && subir(i.tipo, e.target.files[0])}
                 />
               </label>
+            </div>
+
+            {verHallazgos === i.tipo && <Hallazgos cargaId={i.carga_id} />}
             </div>
           ))}
         </div>
@@ -318,6 +332,158 @@ export default function Encargo({ encargoId, onVolver }) {
         </section>
       )}
       </>)}
+    </div>
+  );
+}
+
+
+/* ------------------------------------------------------------------ hallazgos
+
+   La tarjeta del archivo decía "con hallazgos" y ahí se acababa: el auditor
+   sabía que algo falló pero no qué cuenta, ni con qué cifras, ni por qué. El
+   dato ya estaba en la base desde que se promovió el balance; solo faltaba
+   mostrarlo.
+
+   Cada tipo se explica en prosa, no con la fórmula: quien revisa el papel no
+   tiene por qué traducir "saldo_inicial + debito - credito <> saldo_final".
+*/
+
+const TIPOS = {
+  DESCUADRE_LINEA: {
+    titulo: "Cuentas que no cuadran con sus propios movimientos",
+    explica: "El saldo inicial más los débitos menos los créditos no da el " +
+             "saldo final que trae el archivo. O el saldo final está mal, o " +
+             "falta un movimiento, o el archivo se editó después de generarlo.",
+    tono: "rojo",
+  },
+  DESCUADRE_NIVEL: {
+    titulo: "Niveles del balance que no suman cero",
+    explica: "Sumadas todas las cuentas del nivel, el resultado debe ser cero " +
+             "por la ecuación contable. Si no lo es, el balance llegó " +
+             "desbalanceado o hay cuentas por fuera del catálogo.",
+    tono: "rojo",
+  },
+  DETALLE_TRUNCADO: {
+    titulo: "El detalle está acotado",
+    explica: "",
+    tono: "ambar",
+  },
+};
+
+function Hallazgos({ cargaId }) {
+  const [filas, setFilas] = useState(null);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let vivo = true;
+    api.hallazgos(cargaId)
+      .then((r) => vivo && setFilas(r))
+      .catch((e) => vivo && setError(e.message));
+    return () => { vivo = false; };
+  }, [cargaId]);
+
+  if (error) return <div className="px-4 pb-4"><Aviso tono="error">{error}</Aviso></div>;
+  if (!filas) return <p className="px-4 pb-4 text-xs text-tinta-suave">Cargando el detalle…</p>;
+  if (!filas.length) {
+    return <p className="px-4 pb-4 text-xs text-tinta-suave">Sin detalle registrado.</p>;
+  }
+
+  // Un grupo por tipo, en el orden en que llegan (bloqueantes primero).
+  const grupos = [];
+  for (const h of filas) {
+    const g = grupos.find((x) => x.tipo === h.tipo);
+    if (g) g.filas.push(h);
+    else grupos.push({ tipo: h.tipo, filas: [h] });
+  }
+
+  return (
+    <div className="border-t border-regla bg-papel/60 px-4 py-4 space-y-5">
+      {grupos.map((g) => {
+        const meta = TIPOS[g.tipo] ?? { titulo: g.tipo, explica: "", tono: "gris" };
+        return (
+          <div key={g.tipo}>
+            <p className="flex items-center gap-2 text-sm font-semibold">
+              <Chip tono={meta.tono}>{entero(g.filas.length)}</Chip>
+              {meta.titulo}
+            </p>
+            {meta.explica && (
+              <p className="mt-1 max-w-3xl text-xs leading-relaxed text-tinta-media">
+                {meta.explica}
+              </p>
+            )}
+
+            {g.tipo === "DESCUADRE_LINEA" ? (
+              <div className="mt-3 overflow-x-auto rounded-lg border border-regla bg-papel-alto">
+                <table className="tabla w-full text-xs">
+                  <thead>
+                    <tr className="rotulo text-left">
+                      <th className="px-3 py-2 font-normal">Cuenta</th>
+                      <th className="px-3 py-2 text-right font-normal">Saldo inicial</th>
+                      <th className="px-3 py-2 text-right font-normal">Débito</th>
+                      <th className="px-3 py-2 text-right font-normal">Crédito</th>
+                      <th className="px-3 py-2 text-right font-normal">Debería dar</th>
+                      <th className="px-3 py-2 text-right font-normal">Saldo del archivo</th>
+                      <th className="px-3 py-2 text-right font-normal">Diferencia</th>
+                      <th className="px-3 py-2 text-right font-normal">Fila</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {g.filas.map((h) => {
+                      /* "Debería dar" no reimplementa la regla: se despeja de la
+                         diferencia que ya calculó el motor (dif = si+db-cr-sf),
+                         así nunca puede contradecirlo. */
+                      const esperado = h.saldo_final === null || h.saldo_final === undefined
+                        ? null
+                        : Number(h.saldo_final) + Number(h.monto);
+                      return (
+                        <tr key={h.id} className="border-t border-regla-fina">
+                          <td className="px-3 py-2">
+                            <span className="cifra font-semibold">{h.codigo_puc}</span>
+                            <span className="ml-2 text-tinta-media">
+                              {h.nombre_cuenta ?? "—"}
+                            </span>
+                          </td>
+                          <td className="cifra px-3 py-2 text-right">{monto(h.saldo_inicial)}</td>
+                          <td className="cifra px-3 py-2 text-right">{monto(h.debito)}</td>
+                          <td className="cifra px-3 py-2 text-right">{monto(h.credito)}</td>
+                          <td className="cifra px-3 py-2 text-right text-tinta-media">
+                            {esperado === null ? "—" : monto(esperado)}
+                          </td>
+                          <td className="cifra px-3 py-2 text-right">{monto(h.saldo_final)}</td>
+                          <td className="cifra px-3 py-2 text-right font-semibold text-rojo">
+                            {monto(h.monto)}
+                          </td>
+                          <td className="cifra px-3 py-2 text-right text-tinta-suave">
+                            {h.fila_origen ?? "—"}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <ul className="mt-3 space-y-1.5">
+                {g.filas.map((h) => (
+                  <li key={h.id}
+                      className="flex flex-wrap items-baseline gap-x-3 rounded-lg border border-regla bg-papel-alto px-3 py-2 text-xs">
+                    <span className="flex-1 text-tinta-media">{h.descripcion}</span>
+                    {h.monto !== null && h.monto !== undefined && (
+                      <span className="cifra font-semibold text-rojo">{monto(h.monto)}</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        );
+      })}
+
+      <p className="text-xs text-tinta-suave">
+        Estas cuentas son las mismas que hacen fallar los controles del papel de
+        trabajo. Mientras no se corrijan en el origen, la conclusión sale como no
+        concluyente.
+      </p>
     </div>
   );
 }

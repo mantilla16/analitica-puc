@@ -631,6 +631,17 @@ def estado_carga(carga_id: str) -> dict:
     }
 
 
+@app.get("/cargas/{carga_id}/hallazgos")
+def hallazgos_carga(carga_id: str) -> list[dict]:
+    """El detalle de los hallazgos de una carga.
+
+    La tarjeta del archivo solo alcanza a decir "con hallazgos"; esto es lo
+    que hay detrás de esa etiqueta.
+    """
+    _carga(carga_id)          # 404 si la carga no existe
+    return db.hallazgos_detalle(carga_id)
+
+
 @app.get("/cotejos/{cotejo_id}/evidencia")
 def evidencia(cotejo_id: int, solo_fuera: bool = False,
               limite: int = 200) -> list[dict]:
