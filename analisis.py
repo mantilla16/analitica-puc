@@ -532,6 +532,18 @@ def evidencia_cuenta(encargo_id: str, fase: str, codigo: str) -> dict:
     }
 
 
+# Dos exportes del mismo mayor pueden diferir en centavos por cómo cada uno
+# redondea. Sin tolerancia, un centavo sobre siete mil millones tumba el papel
+# entero -- y un control que falla por redondeos enseña a ignorarlo, que es
+# peor que no tenerlo.
+#
+# Un peso por cuenta: absorbe el redondeo entre dos exportes y deja fallar
+# cualquier omisión real, que nunca es de centavos. La diferencia NO se calla:
+# se reporta como cuadre con diferencia de redondeo, con su cifra. Una
+# tolerancia silenciosa sería exactamente el error que este papel persigue.
+TOLERANCIA_CUADRE = Decimal("1.00")
+
+
 def _cuadre_movimientos(fila: dict, totales: dict | None, signo: int) -> dict | None:
     """¿Los movimientos del periodo explican la cifra que se está mirando?
 
@@ -553,6 +565,7 @@ def _cuadre_movimientos(fila: dict, totales: dict | None, signo: int) -> dict | 
         contra, esperado = "el saldo actual", Decimal(fila["saldo_actual"])
 
     dif = (neto - esperado).quantize(Decimal("0.01"))
+    dentro = abs(dif) <= TOLERANCIA_CUADRE
     return {
         "movimientos": totales["n"],
         "debito": _cop(totales["debito"]),
@@ -561,7 +574,11 @@ def _cuadre_movimientos(fila: dict, totales: dict | None, signo: int) -> dict | 
         "contra": contra,
         "esperado": _cop(esperado),
         "diferencia": _cop(dif),
-        "cuadra": dif == 0,
+        "cuadra": dentro,
+        # Cuadra dentro de la tolerancia, pero no es exacto. Se distingue para
+        # que el papel pueda decirlo en vez de presentarlo como cuadre limpio.
+        "por_redondeo": dif != 0 and dentro,
+        "tolerancia": _cop(TOLERANCIA_CUADRE),
     }
 
 

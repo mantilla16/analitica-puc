@@ -45,6 +45,9 @@ MARCAS = [
      "procedimiento": "Suma de los movimientos del periodo de la cuenta y sus auxiliares.",
      "contra": "El archivo de movimientos, que es una fuente DISTINTA del balance. "
                "Es el único control aquí que contrasta contra un origen independiente.",
+     "tolerancia": "Hasta un peso de diferencia por cuenta, para absorber el "
+                   "redondeo entre dos exportes del mismo mayor. Las cuentas que "
+                   "usan esa tolerancia se listan con su diferencia.",
      "evidencia": True},
     {"marca": "Δ", "nombre": "Comparativo", "nia": "NIA 520",
      "procedimiento": "Saldo del corte menos saldo del periodo comparativo, en saldo natural.",
@@ -310,7 +313,8 @@ def _gates(encargo_id: str, d: dict) -> list[dict]:
             "verificadas contra sí mismas.",
         ))
     else:
-        revisadas, cuadran, no_cuadran = 0, 0, []
+        revisadas, cuadran, no_cuadran, redondeos = 0, 0, [], []
+        tolerancia = A._cop(A.TOLERANCIA_CUADRE)
         for f in d["filas"]:
             if not f["significativa"]:
                 continue
@@ -319,22 +323,34 @@ def _gates(encargo_id: str, d: dict) -> list[dict]:
             if not c:
                 continue
             revisadas += 1
+            fila = {"cuenta": f["cuenta"], "nombre": f["nombre"],
+                    "contra": c["contra"], "esperado": c["esperado"],
+                    "neto_movimientos": c["neto"],
+                    "diferencia": c["diferencia"]}
             if c["cuadra"]:
                 cuadran += 1
+                # Cuadra dentro de la tolerancia pero no exacto: se declara.
+                # Una tolerancia que se aplica en silencio es lo mismo que no
+                # haber corrido el control.
+                if c.get("por_redondeo"):
+                    redondeos.append(fila)
             else:
-                no_cuadran.append({"cuenta": f["cuenta"], "nombre": f["nombre"],
-                                   "contra": c["contra"], "esperado": c["esperado"],
-                                   "neto_movimientos": c["neto"],
-                                   "diferencia": c["diferencia"]})
+                no_cuadran.append(fila)
         gates.append(_control(
             "G03", "M", "Cruce con movimientos (fuente independiente)",
             "NO_EJECUTADO" if revisadas == 0 else "OK" if not no_cuadran else "FALLA",
-            f"En {cuadran} de {revisadas} cuentas seleccionadas, la suma de los "
-            "movimientos del periodo reproduce la cifra del balance. Es el único "
-            "control contra un origen distinto."
+            (f"En {cuadran} de {revisadas} cuentas seleccionadas, la suma de los "
+             "movimientos del periodo reproduce la cifra del balance. Es el único "
+             f"control contra un origen distinto. Se admite hasta {tolerancia} "
+             "de diferencia por cuenta, que es lo que puede variar el redondeo "
+             "entre dos exportes del mismo mayor."
+             + (f" {len(redondeos)} cuenta(s) cuadran dentro de esa tolerancia "
+                "sin ser exactas y se detallan abajo." if redondeos else ""))
             if revisadas else
             "Ninguna cuenta seleccionada tiene movimientos asociados.",
             cifras={"revisadas": revisadas, "cuadran": cuadran,
+                    "tolerancia_por_cuenta": tolerancia,
+                    "por_redondeo": redondeos,
                     "no_cuadran": no_cuadran},
         ))
 

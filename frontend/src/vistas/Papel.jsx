@@ -41,7 +41,8 @@ const INSUMO = {
 function DetalleFalla({ c }) {
   // G02: descuadres de línea, agrupados por balance
   const porBalance = Object.entries(c.cifras ?? {})
-    .filter(([, v]) => Array.isArray(v) && v.length && v[0]?.codigo);
+    .filter(([k, v]) => k !== "por_redondeo"
+                        && Array.isArray(v) && v.length && v[0]?.codigo);
   // G03: cuentas donde los movimientos no reproducen la cifra
   const noCuadran = c.cifras?.no_cuadran ?? [];
 
@@ -93,6 +94,26 @@ function Control({ c }) {
         </p>
         <p className="mt-1 text-xs leading-relaxed text-tinta-media">{c.detalle}</p>
         {c.estado === "FALLA" && <DetalleFalla c={c} />}
+        {(c.cifras?.por_redondeo?.length > 0) && (
+          <div className="mt-2 rounded-[8px] bg-ambar-tenue p-3">
+            <p className="rotulo text-ambar">
+              Cuadran dentro de la tolerancia, no exactas
+            </p>
+            {c.cifras.por_redondeo.map((f) => (
+              <p key={f.cuenta} className="mt-1 text-xs">
+                <span className="cifra font-semibold">{f.cuenta}</span>{" "}
+                <span className="text-tinta-media">{f.nombre}</span>
+                {" · "}
+                <span className="text-tinta-suave">movimientos </span>
+                <span className="cifra">{f.neto_movimientos}</span>
+                <span className="text-tinta-suave"> contra {f.contra} </span>
+                <span className="cifra">{f.esperado}</span>
+                <span className="text-tinta-suave"> · diferencia </span>
+                <span className="cifra text-ambar">{f.diferencia}</span>
+              </p>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -446,6 +467,11 @@ export default function Papel({ encargoId, fase }) {
                 <p className="mt-0.5 text-xs text-tinta-suave">
                   <span className="rotulo">Contra: </span>{m.contra}
                 </p>
+                {m.tolerancia && (
+                  <p className="mt-0.5 text-xs text-tinta-suave">
+                    <span className="rotulo">Tolerancia: </span>{m.tolerancia}
+                  </p>
+                )}
               </div>
             </div>
           ))}

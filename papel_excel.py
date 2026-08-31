@@ -215,30 +215,48 @@ def construir(p: dict) -> bytes:
               "BAL_CORTE_ANTERIOR": "Balance al mismo corte del año anterior"}
     detalle = []
     for c in p["gates"]:
-        if c["estado"] != "FALLA":
-            continue
-        for tipo, filas in (c.get("cifras") or {}).items():
-            if isinstance(filas, list) and filas and isinstance(filas[0], dict):
+        cifras = c.get("cifras") or {}
+        if c["estado"] == "FALLA":
+            for tipo, filas in cifras.items():
+                if tipo == "por_redondeo" or not (
+                        isinstance(filas, list) and filas
+                        and isinstance(filas[0], dict)):
+                    continue
                 for f in filas:
                     if "codigo" in f:          # descuadre de línea
-                        detalle.append([c["codigo"], INSUMO.get(tipo, tipo),
+                        detalle.append([c["codigo"], "Falla",
+                                        INSUMO.get(tipo, tipo),
                                         f["codigo"], f["nombre"],
                                         "saldo inicial + débitos − créditos ≠ saldo final",
                                         _num(f["diferencia"])])
                     elif "cuenta" in f:        # movimientos que no reproducen
-                        detalle.append([c["codigo"], "Movimientos del periodo",
+                        detalle.append([c["codigo"], "Falla",
+                                        "Movimientos del periodo",
                                         f["cuenta"], f["nombre"],
                                         f"neto {f['neto_movimientos']} contra "
                                         f"{f['contra']} {f['esperado']}",
                                         _num(f["diferencia"])])
+        # Las cuentas que pasaron USANDO la tolerancia van en la misma hoja:
+        # una tolerancia que se aplica y no se declara equivale a no haber
+        # corrido el control.
+        for f in cifras.get("por_redondeo") or []:
+            detalle.append([c["codigo"], "Dentro de tolerancia",
+                            "Movimientos del periodo",
+                            f["cuenta"], f["nombre"],
+                            f"neto {f['neto_movimientos']} contra {f['contra']} "
+                            f"{f['esperado']} — diferencia admitida como redondeo "
+                            f"(tolerancia {cifras.get('tolerancia_por_cuenta')} "
+                            "por cuenta)",
+                            _num(f["diferencia"])])
     if detalle:
-        h = _hoja(wb, "Descuadres", "Descuadres detectados",
-                  "Las cuentas concretas detrás de cada control que falló. "
-                  "Es por donde empieza la revisión.")
-        _tabla(h, 4, ["Control", "Fuente", "Cuenta", "Nombre", "Qué no cuadra",
-                      "Diferencia"],
-               detalle, anchos=[10, 34, 12, 40, 62, 20],
-               formatos={6: PESOS}, principal=True)
+        h = _hoja(wb, "Descuadres", "Descuadres y diferencias toleradas",
+                  "Las cuentas concretas detrás de cada control que falló, y las "
+                  "que pasaron usando la tolerancia declarada. Es por donde "
+                  "empieza la revisión.")
+        _tabla(h, 4, ["Control", "Estado", "Fuente", "Cuenta", "Nombre",
+                      "Detalle", "Diferencia"],
+               detalle, anchos=[10, 20, 30, 12, 40, 68, 20],
+               formatos={7: PESOS}, principal=True)
 
     # ------------------------------------------- 4. cédula sumaria
     h = _hoja(wb, "Cédula sumaria", "Cédula sumaria — saldos por clase",
