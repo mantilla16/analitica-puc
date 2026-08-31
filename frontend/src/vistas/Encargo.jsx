@@ -289,8 +289,7 @@ export default function Encargo({ encargoId, onVolver }) {
                       <th className="px-3 py-2 font-normal">Cuenta</th>
                       <th className="px-3 py-2 font-normal">Documento</th>
                       <th className="px-3 py-2 font-normal">Fecha</th>
-                      <th className="px-3 py-2 font-normal">Antes</th>
-                      <th className="px-3 py-2 font-normal">Ahora</th>
+                      <th className="px-3 py-2 font-normal">Qué cambió</th>
                       <th className="px-3 py-2 text-center font-normal">Cuadre</th>
                     </tr>
                   </thead>
@@ -304,12 +303,7 @@ export default function Encargo({ encargoId, onVolver }) {
                         <td className="cifra px-3 py-2">{d.codigo_puc}</td>
                         <td className="cifra px-3 py-2 text-xs">{d.num_doc ?? "—"}</td>
                         <td className="cifra px-3 py-2 text-xs">{fecha(d.fecha)}</td>
-                        <td className="cifra px-3 py-2 text-right text-xs text-tinta-suave">
-                          {d.valor_antes ? monto(d.valor_antes.saldo_final ?? d.valor_antes.debito) : "—"}
-                        </td>
-                        <td className="cifra px-3 py-2 text-right text-xs">
-                          {d.valor_ahora ? monto(d.valor_ahora.saldo_final ?? d.valor_ahora.debito) : "—"}
-                        </td>
+                        <td className="px-3 py-2"><Cambios d={d} /></td>
                         <td className="px-3 py-2 text-center">
                           {d.descuadre_linea ? (
                             <span title="saldo_inicial + débito - crédito - saldo_final">
@@ -484,6 +478,65 @@ function Hallazgos({ cargaId }) {
         trabajo. Mientras no se corrijan en el origen, la conclusión sale como no
         concluyente.
       </p>
+    </div>
+  );
+}
+
+
+/* -------------------------------------------------------------------- cambios
+
+   Esta celda mostraba solo el saldo final. Con eso, un cambio en el débito
+   -- el caso típico de un archivo reeditado -- salía marcado "MODIFICADA"
+   con la misma cifra a los dos lados: la fila acusaba un cambio y no
+   mostraba ninguno. Ahora se compara campo por campo.
+
+   Y si de verdad ningún valor cambió, se dice así en lugar de dejar la duda:
+   es el síntoma de una fila que quedó marcada por cómo estaba escrita la
+   cifra, no por lo que valía.
+*/
+
+const CAMPO = {
+  saldo_inicial: "Saldo inicial",
+  debito: "Débito",
+  credito: "Crédito",
+  saldo_final: "Saldo final",
+  descripcion: "Descripción",
+};
+
+function Cambios({ d }) {
+  const a = d.valor_antes;
+  const b = d.valor_ahora;
+  if (!a) return <span className="rotulo text-verde">fila nueva</span>;
+  if (!b) return <span className="rotulo text-rojo">fila eliminada</span>;
+
+  const campos = [...new Set([...Object.keys(a), ...Object.keys(b)])];
+  const distintos = campos.filter((k) =>
+    k === "descripcion"
+      ? (a[k] ?? "") !== (b[k] ?? "")
+      : Number(a[k] ?? 0) !== Number(b[k] ?? 0));
+
+  if (!distintos.length) {
+    return (
+      <span className="text-xs text-tinta-media">
+        Ningún valor cambió: la misma cifra viene escrita distinto en el archivo.
+      </span>
+    );
+  }
+
+  return (
+    <div className="space-y-0.5">
+      {distintos.map((k) => (
+        <p key={k} className="whitespace-nowrap text-xs">
+          <span className="text-tinta-suave">{CAMPO[k] ?? k}</span>{" "}
+          <span className={`${k === "descripcion" ? "" : "cifra "}text-tinta-suave line-through`}>
+            {k === "descripcion" ? (a[k] ?? "—") : monto(a[k])}
+          </span>
+          <span className="mx-1 text-tinta-suave">→</span>
+          <span className={`${k === "descripcion" ? "" : "cifra "}font-semibold`}>
+            {k === "descripcion" ? (b[k] ?? "—") : monto(b[k])}
+          </span>
+        </p>
+      ))}
     </div>
   );
 }

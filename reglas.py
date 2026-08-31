@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import hashlib
 from datetime import date
-from decimal import Decimal
-from typing import Iterable
+from decimal import Decimal, InvalidOperation
+from typing import Any, Iterable
 
 # --------------------------------------------------------------- materialidad
 
@@ -75,6 +75,30 @@ def _h(*partes: str) -> str:
     return hashlib.sha256("|~|".join(partes).encode()).hexdigest()
 
 
+def _n(v: Any) -> str:
+    """El VALOR de una cifra, no su escritura.
+
+    La huella se calculaba sobre el texto tal como salió del archivo, y ahí
+    `37719.9` y `37719.90` son dos huellas distintas para el mismo peso.
+    Consecuencia: reemplazar un archivo donde una celda pasó de texto a
+    número -- o de 0 a 0.00, que Excel cambia solo al guardar -- marcaba la
+    fila como MODIFICADA, y si el periodo ya estaba cerrado disparaba la
+    alerta de "cambios en periodo ya auditado" sin que nadie hubiera tocado
+    una cifra. Una alerta falsa que aparece sola es peor que ninguna: le
+    enseña al auditor a ignorarlas.
+
+    Se cuantiza a dos decimales porque es la precisión que el sistema
+    conserva de staging en adelante (`numeric(19,2)`): comparar con más
+    precisión de la que se guarda solo produce diferencias fantasma.
+    """
+    if v is None or v == "":
+        return "0.00"
+    try:
+        return f"{Decimal(str(v)).quantize(Decimal('0.01')):f}"
+    except (InvalidOperation, ValueError, ArithmeticError):
+        return str(v)      # no es un número: se compara como texto
+
+
 def llave_movimiento(f: dict) -> str:
     """Llave natural verificada en datos reales: única en 122.795 filas."""
     return _h(f.get("num_doc") or "", f.get("secuencia") or "",
@@ -85,7 +109,7 @@ def huella_movimiento(f: dict) -> str:
     return _h(f.get("num_doc") or "", f.get("secuencia") or "",
               f.get("codigo_puc") or "", f.get("fecha") or "",
               f.get("tercero_nit") or "", f.get("descripcion") or "",
-              f.get("debito") or "0", f.get("credito") or "0")
+              _n(f.get("debito")), _n(f.get("credito")))
 
 
 def llave_balance(f: dict) -> str:
@@ -93,9 +117,9 @@ def llave_balance(f: dict) -> str:
 
 
 def huella_balance(f: dict) -> str:
-    return _h(f.get("codigo_puc") or "", f.get("saldo_inicial") or "0",
-              f.get("debito") or "0", f.get("credito") or "0",
-              f.get("saldo_final") or "0")
+    return _h(f.get("codigo_puc") or "", _n(f.get("saldo_inicial")),
+              _n(f.get("debito")), _n(f.get("credito")),
+              _n(f.get("saldo_final")))
 
 
 def marcar_huellas(filas: Iterable[dict], naturaleza: str):
