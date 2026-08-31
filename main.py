@@ -582,7 +582,7 @@ def _tarea(carga_id: str) -> None:
 
 
 @app.post("/cargas/{carga_id}/procesar")
-def procesar(carga_id: str, tareas: BackgroundTasks,
+def procesar(carga_id: str, request: Request, tareas: BackgroundTasks,
              sincrono: bool = False) -> dict:
     c = _carga(carga_id)
     if not c["perfil_id"]:
