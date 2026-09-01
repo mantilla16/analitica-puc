@@ -10,6 +10,7 @@ from decimal import Decimal
 
 import db
 import ia
+import reglas as R
 
 
 # =====================================================================
@@ -188,19 +189,9 @@ def variaciones(encargo_id: str, fase: str | None = None) -> dict:
         var = (sa - sc).quantize(Decimal("0.01"))
         pctv = ((sa - sc) / abs(sc) * 100).quantize(Decimal("0.01")) if sc else None
 
-        motivo = None
-        if aplica:
-            if abs(var) >= umbral:
-                motivo = "Monto"
-            elif sc == 0 and abs(sa) >= trivial:
-                motivo = "Cuenta nueva"
-            elif sa == 0 and abs(sc) >= trivial:
-                motivo = "Cuenta cerrada"
-            elif (usa_var and pctv is not None
-                  and abs(pctv) >= pct_var and abs(var) >= trivial):
-                motivo = "Comportamiento"
-            elif sa < 0 and abs(sa) >= trivial:
-                motivo = "Naturaleza"
+        motivo = R.motivo_seleccion(sa, sc, var, pctv,
+                                    umbral if aplica else None,
+                                    trivial, pct_var, usa_var)
 
         filas.append({
             "cuenta": cod,
@@ -236,11 +227,10 @@ def variaciones(encargo_id: str, fase: str | None = None) -> dict:
         "aplica_trivialidad": usa_triv,
         "total_cuentas": len(filas),
         "significativas": sum(1 for f in filas if f["significativa"]),
-        "por_motivo": {
-            m: sum(1 for f in filas if f["motivo"] == m)
-            for m in ("Monto", "Comportamiento", "Cuenta nueva",
-                      "Cuenta cerrada", "Naturaleza")
-        },
+        # Sale de R.MOTIVOS y no de una lista repetida aquí: si algún día se
+        # agrega un motivo, aparece solo en vez de faltar en silencio.
+        "por_motivo": {m: sum(1 for f in filas if f["motivo"] == m)
+                       for m in R.MOTIVOS},
         "residuo_no_seleccionado": residuo,
         "residuo_supera_umbral": bool(umbral and residuo > umbral),
         "desglose_no_seleccionado": (

@@ -207,6 +207,59 @@ def _controles_previos(enc: dict, contrato: list[dict]) -> list[dict]:
         cifras={"faltan": faltan, "sin_promover": vacios} if (faltan or vacios) else None,
     ))
 
+    # -- cuadre del asiento: integridad de la fuente independiente
+    # Va aquí y no entre los gates a propósito: es un control SOBRE el
+    # archivo de movimientos, y tiene que correr antes de usarlo para
+    # cruzar. Si el asiento no cuadra, el cruce suma sobre datos parciales.
+    mov = por_tipo.get("MOV_ACTUAL")
+    if not mov:
+        ctrl.append(_control(
+            "P05", "?", "Cuadre del asiento por documento", "ALERTA",
+            "No hay movimientos cargados, así que no se pudo verificar que "
+            "los asientos cuadren. El cruce contra la fuente independiente "
+            "queda sin respaldo.",
+        ))
+    else:
+        cd = db.cuadre_documentos(mov["carga_id"])
+        if cd["documentos"] == 0:
+            estado, detalle = "ALERTA", (
+                "Ninguna línea del archivo de movimientos trae número de "
+                "documento, así que no hay forma de agrupar los asientos ni de "
+                "verificar que cuadren. El control no se pudo ejecutar.")
+        elif cd["multi_fecha"]:
+            # El supuesto del control no se cumple: no se reportan
+            # descuadres que probablemente sean del agrupamiento, no del dato.
+            estado, detalle = "ALERTA", (
+                f"{cd['multi_fecha']} de {cd['documentos']} documentos abarcan "
+                "más de una fecha, lo que indica que el número de documento se "
+                "reutiliza y no identifica un asiento único. Agrupar por él "
+                "produciría descuadres falsos, así que el control no concluye.")
+        elif cd["descuadrados"]:
+            estado, detalle = "BLOQUEANTE", (
+                f"{cd['descuadrados']} de {cd['documentos']} documentos no "
+                f"cuadran: sus débitos no igualan sus créditos, por "
+                f"{A._cop(cd['monto_descuadrado'])} en total. Esos asientos "
+                "llegaron incompletos, así que la suma de movimientos de toda "
+                "cuenta que tocan es parcial -- aunque el balance cuadre. Las "
+                "cuentas afectadas se listan abajo: en ellas el cruce contra "
+                "la fuente independiente no prueba nada.")
+        else:
+            estado, detalle = "OK", (
+                f"Los {cd['documentos']} documentos del archivo cuadran: en cada "
+                "uno los débitos igualan los créditos. El archivo de movimientos "
+                "está completo a nivel de asiento, que es la condición para que "
+                "el cruce contra él signifique algo.")
+        if cd["lineas_sin_documento"]:
+            detalle += (f" {cd['lineas_sin_documento']} línea(s) sin número de "
+                        "documento quedaron fuera de esta verificación.")
+        ctrl.append(_control(
+            "P05", "Σ", "Cuadre del asiento por documento", estado, detalle,
+            cifras={k: cd[k] for k in
+                    ("documentos", "descuadrados", "monto_descuadrado",
+                     "multi_fecha", "lineas_sin_documento",
+                     "cuentas_afectadas")} | {"documentos_descuadrados": cd["detalle"]},
+        ))
+
     # -- periodos: que cada balance sea del periodo que dice ser
     esperado = {
         "BAL_ACTUAL": enc["fecha_corte"],
@@ -393,6 +446,14 @@ def _riesgo(gates: list[dict], previos: list[dict], d: dict) -> dict:
     elif g3.get("estado") == "NO_EJECUTADO":
         sumar(3, "El único control contra una fuente independiente no se pudo correr",
               "Control G03")
+    p5 = por_codigo.get("P05", {})
+    if p5.get("estado") == "BLOQUEANTE":
+        sumar(5, "Hay asientos que no cuadran: el archivo de movimientos llegó "
+                 "incompleto a nivel de documento", "Control P05")
+    elif p5.get("estado") == "ALERTA":
+        sumar(3, "No se pudo verificar que los asientos cuadren, así que el "
+                 "cruce contra la fuente independiente queda sin respaldo",
+              "Control P05")
     if por_codigo.get("P02", {}).get("estado") == "ALERTA":
         sumar(3, "Algún comparativo no corresponde al periodo esperado", "Control P02")
     if por_codigo.get("P03", {}).get("estado") == "ALERTA":
@@ -414,12 +475,20 @@ def _riesgo(gates: list[dict], previos: list[dict], d: dict) -> dict:
 
 # ============================================================== conclusión
 
-def _conclusion(gates: list[dict], riesgo: dict, d: dict) -> dict:
+def _conclusion(gates: list[dict], previos: list[dict], riesgo: dict,
+                d: dict) -> dict:
     """Se arma con los resultados, no se redacta a mano. Si un control que
     constituye evidencia falló, no se concluye razonabilidad: se dice que
-    no se puede concluir."""
+    no se puede concluir.
+
+    Los controles previos también cuentan. Antes solo se miraban los gates,
+    de modo que un previo BLOQUEANTE -- un insumo ausente, un asiento que no
+    cuadra -- podía dejar el papel concluyendo razonabilidad sobre datos que
+    el propio papel había marcado como no aptos para cruzar.
+    """
     evidencia = [g for g in gates if g["es_evidencia"]]
-    fallas = [g for g in evidencia if g["estado"] == "FALLA"]
+    bloqueados = [c for c in previos if c["estado"] == "BLOQUEANTE"]
+    fallas = [g for g in evidencia if g["estado"] == "FALLA"] + bloqueados
     sin_correr = [g for g in evidencia if g["estado"] == "NO_EJECUTADO"]
 
     if fallas:
@@ -524,7 +593,7 @@ def papel_trabajo(encargo_id: str, fase: str | None = None) -> dict:
         "hallazgos": hallazgos,
         "marcas": MARCAS,
         "riesgo": riesgo,
-        "conclusion": _conclusion(gates, riesgo, d),
+        "conclusion": _conclusion(gates, previos, riesgo, d),
         "trazabilidad": {
             "eventos": db.bitacora(encargo_id=encargo_id, limite=300),
             "observaciones_ia": db.historia_observaciones_ia(enc["cliente_id"]),

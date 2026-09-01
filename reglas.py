@@ -131,6 +131,42 @@ def marcar_huellas(filas: Iterable[dict], naturaleza: str):
         yield f
 
 
+# ------------------------------------------------------ motivo de selección
+
+MOTIVOS = ("Monto", "Cuenta nueva", "Cuenta cerrada", "Comportamiento",
+           "Naturaleza")
+
+
+def motivo_seleccion(sa: Decimal, sc: Decimal, var: Decimal,
+                     pctv: Decimal | None, umbral: Decimal | None,
+                     trivial: Decimal, pct_var: Decimal,
+                     usa_var: bool) -> str | None:
+    """Por qué una cuenta entra al alcance, o None si no entra.
+
+    Estaba dentro de `variaciones`, entre las consultas y el armado de la
+    fila, donde no había forma de probarla sin base de datos. Es la decisión
+    más importante del módulo -- define el alcance del trabajo -- así que
+    vive aparte y se valida con casos sembrados.
+
+    La cascada es `elif` a propósito: una cuenta se marca por UN motivo, el
+    primero que aplica, en orden de fuerza. Si se marcara por varios, contar
+    "cuántas por comportamiento" dejaría de sumar al total.
+    """
+    if umbral is None:
+        return None                      # sin materialidad no se marca nada
+    if abs(var) >= umbral:
+        return "Monto"
+    if sc == 0 and abs(sa) >= trivial:
+        return "Cuenta nueva"
+    if sa == 0 and abs(sc) >= trivial:
+        return "Cuenta cerrada"
+    if usa_var and pctv is not None and abs(pctv) >= pct_var and abs(var) >= trivial:
+        return "Comportamiento"
+    if sa < 0 and abs(sa) >= trivial:
+        return "Naturaleza"
+    return None
+
+
 # ------------------------------------------------------------------- cotejo
 
 def cotejar(nuevas: dict[str, str], previas: dict[str, str]) -> dict[str, list[str]]:

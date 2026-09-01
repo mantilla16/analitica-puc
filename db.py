@@ -570,6 +570,82 @@ def crear_hallazgo(**d: Any) -> None:
              tuple(d.values()))
 
 
+def cuadre_documentos(carga_id: str, limite: int = 100) -> dict:
+    """¿Cada documento contable cuadra en sí mismo?
+
+    Es un control sobre el archivo de MOVIMIENTOS, que es la única fuente
+    independiente que tiene el papel. Si un documento no cuadra, ese
+    documento llegó incompleto, y toda cuenta que toque queda con una suma
+    de movimientos que no se sostiene -- aunque el balance, por su lado,
+    cuadre perfectamente. Es el caso exacto que el cruce contra movimientos
+    no puede ver por sí solo: suma por cuenta, no por documento.
+
+    El control declara su propia confiabilidad. Agrupar por `num_doc`
+    supone que ese número identifica UN documento; si el ERP reusa el
+    consecutivo, un documento agrupado abarcaría varias fechas y los
+    descuadres reportados serían falsos. Eso se cuenta y se devuelve, en vez
+    de suponer que el supuesto se cumple.
+    """
+    base = """FROM raw.movimiento_staging
+              WHERE carga_id=%s AND num_doc IS NOT NULL AND num_doc <> ''"""
+
+    tot = uno(
+        f"""WITH doc AS (
+                SELECT num_doc,
+                       sum(debito::numeric - credito::numeric) AS diferencia,
+                       count(DISTINCT fecha) AS fechas
+                {base}
+                GROUP BY num_doc)
+            SELECT count(*) AS documentos,
+                   count(*) FILTER (WHERE diferencia <> 0) AS descuadrados,
+                   coalesce(sum(abs(diferencia)) FILTER (WHERE diferencia <> 0), 0)
+                     AS monto_descuadrado,
+                   count(*) FILTER (WHERE fechas > 1) AS multi_fecha
+              FROM doc""",
+        (carga_id,),
+    )
+
+    sin_doc = uno(
+        """SELECT count(*) AS n FROM raw.movimiento_staging
+           WHERE carga_id=%s AND (num_doc IS NULL OR num_doc = '')""",
+        (carga_id,),
+    )["n"]
+
+    detalle = varios(
+        f"""WITH doc AS (
+                SELECT num_doc, count(*) AS lineas,
+                       min(fecha) AS fecha,
+                       sum(debito::numeric)  AS debito,
+                       sum(credito::numeric) AS credito,
+                       sum(debito::numeric - credito::numeric) AS diferencia
+                {base}
+                GROUP BY num_doc)
+            SELECT * FROM doc WHERE diferencia <> 0
+             ORDER BY abs(diferencia) DESC LIMIT %s""",
+        (carga_id, limite),
+    )
+
+    # Las cuentas que quedan contaminadas: son exactamente aquellas donde el
+    # cruce contra movimientos no puede concluir nada.
+    cuentas = varios(
+        f"""WITH malos AS (
+                SELECT num_doc
+                {base}
+                GROUP BY num_doc
+                HAVING sum(debito::numeric - credito::numeric) <> 0)
+            SELECT left(m.codigo_puc, 4) AS cuenta, count(*) AS lineas,
+                   sum(abs(m.debito::numeric - m.credito::numeric)) AS monto
+              FROM raw.movimiento_staging m
+              JOIN malos ON malos.num_doc = m.num_doc
+             WHERE m.carga_id=%s AND m.codigo_puc IS NOT NULL
+             GROUP BY 1 ORDER BY 3 DESC LIMIT 50""",
+        (carga_id, carga_id),
+    )
+
+    return {**tot, "lineas_sin_documento": sin_doc,
+            "detalle": detalle, "cuentas_afectadas": cuentas}
+
+
 def hallazgos_detalle(carga_id: str) -> list[dict]:
     """Los hallazgos con el nombre y las cifras de la cuenta al lado.
 

@@ -45,8 +45,10 @@ function DetalleFalla({ c }) {
                         && Array.isArray(v) && v.length && v[0]?.codigo);
   // G03: cuentas donde los movimientos no reproducen la cifra
   const noCuadran = c.cifras?.no_cuadran ?? [];
+  // P05: documentos cuyos débitos no igualan sus créditos
+  const docs = c.cifras?.documentos_descuadrados ?? [];
 
-  if (!porBalance.length && !noCuadran.length) return null;
+  if (!porBalance.length && !noCuadran.length && !docs.length) return null;
 
   return (
     <div className="mt-2 rounded-[8px] bg-rojo-tenue p-3">
@@ -62,6 +64,24 @@ function DetalleFalla({ c }) {
           ))}
         </div>
       ))}
+
+      {docs.length > 0 && (
+        <div className="mb-2">
+          <p className="rotulo text-rojo">Documentos que no cuadran</p>
+          {docs.map((x) => (
+            <p key={x.num_doc} className="mt-1 text-xs">
+              <span className="cifra font-semibold">{x.num_doc}</span>
+              <span className="text-tinta-suave"> · {fecha(x.fecha)} · </span>
+              <span className="text-tinta-suave">{x.lineas} líneas · débito </span>
+              <span className="cifra">{monto(x.debito)}</span>
+              <span className="text-tinta-suave"> crédito </span>
+              <span className="cifra">{monto(x.credito)}</span>
+              <span className="text-tinta-suave"> · diferencia </span>
+              <span className="cifra text-rojo">{monto(x.diferencia)}</span>
+            </p>
+          ))}
+        </div>
+      )}
 
       {noCuadran.map((f) => (
         <p key={f.cuenta} className="mt-1 text-xs">
@@ -93,7 +113,24 @@ function Control({ c }) {
           {!c.es_evidencia && <Chip tono="gris">no es evidencia</Chip>}
         </p>
         <p className="mt-1 text-xs leading-relaxed text-tinta-media">{c.detalle}</p>
-        {c.estado === "FALLA" && <DetalleFalla c={c} />}
+        {(c.estado === "FALLA" || c.estado === "BLOQUEANTE") && <DetalleFalla c={c} />}
+        {c.cifras?.cuentas_afectadas?.length > 0 && (
+          <div className="mt-2 rounded-[8px] bg-rojo-tenue p-3">
+            <p className="rotulo text-rojo">
+              Cuentas alcanzadas por esos asientos · el cruce contra
+              movimientos no concluye en ellas
+            </p>
+            <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
+              {c.cifras.cuentas_afectadas.map((a) => (
+                <span key={a.cuenta} className="text-xs">
+                  <span className="cifra font-semibold">{a.cuenta}</span>
+                  <span className="text-tinta-suave"> · </span>
+                  <span className="cifra">{monto(a.monto)}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
         {(c.cifras?.por_redondeo?.length > 0) && (
           <div className="mt-2 rounded-[8px] bg-ambar-tenue p-3">
             <p className="rotulo text-ambar">
