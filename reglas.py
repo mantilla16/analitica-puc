@@ -69,6 +69,24 @@ def resolver_signo(codigo: str, excepciones: dict[str, str],
     return signo_clase.get(codigo[:1], 1)
 
 
+def origen_del_signo(codigo: str, excepciones: dict[str, str],
+                     signo_clase: dict[str, int]) -> tuple[str, int, bool]:
+    """Qué declaración resolvió la naturaleza de un código.
+
+    `signo_de_codigo` devuelve el signo pero no de dónde salió, y para el
+    papel esa procedencia es justo el dato que importa: una naturaleza
+    declarada es una decisión tomada; una heredada de la clase es un supuesto,
+    y de ese supuesto depende el signo con que la cuenta entra al comparativo.
+
+    Devuelve (prefijo, signo, declarado).
+    """
+    for n in range(len(codigo), 0, -1):
+        nat = excepciones.get(codigo[:n])
+        if nat:
+            return codigo[:n], (1 if nat == "D" else -1), True
+    return codigo[:1], signo_clase.get(codigo[:1], 1), False
+
+
 # --------------------------------------------------------------------- huella
 
 def _h(*partes: str) -> str:

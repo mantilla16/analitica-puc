@@ -121,20 +121,47 @@ function Control({ c }) {
                 <tr className="rotulo text-left">
                   <th className="px-3 py-2 font-normal">Cuenta</th>
                   <th className="px-3 py-2 font-normal">Nombre en el balance</th>
-                  <th className="px-3 py-2 font-normal">Naturaleza heredada</th>
+                  <th className="px-3 py-2 font-normal">Naturaleza supuesta</th>
+                  <th className="px-3 py-2 font-normal">Vecinos en el catálogo</th>
                   <th className="px-3 py-2 text-right font-normal">Saldo natural</th>
                 </tr>
               </thead>
               <tbody>
                 {c.cifras.fuera_de_catalogo.map((x) => (
-                  <tr key={x.codigo_puc} className="border-t border-regla-fina">
+                  <tr key={x.codigo_puc}
+                      className={`border-t border-regla-fina ${
+                        x.saldo_contradice_naturaleza ? "bg-ambar-tenue" : ""}`}>
                     <td className="cifra px-3 py-2 font-semibold">{x.codigo_puc}</td>
                     <td className="px-3 py-2 text-tinta-media">
                       {x.nombre_cuenta ?? "—"}
                     </td>
-                    <td className="px-3 py-2 text-tinta-media">
-                      {x.signo === 1 ? "débito" : "crédito"}
-                      <span className="text-tinta-suave"> · heredada de la clase {x.clase}</span>
+                    <td className="px-3 py-2">
+                      <span className={x.saldo_contradice_naturaleza
+                        ? "font-semibold text-ambar" : "text-tinta-media"}>
+                        {x.signo === 1 ? "débito" : "crédito"}
+                      </span>
+                      <span className="text-tinta-suave">
+                        {x.naturaleza_declarada
+                          ? ` · declarada en ${x.prefijo_naturaleza}`
+                          : ` · heredada de la clase ${x.clase}`}
+                      </span>
+                      {x.saldo_contradice_naturaleza && (
+                        <span className="block text-ambar">
+                          el saldo está del lado contrario
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-tinta-suave">
+                      {(x.vecinos_catalogo ?? []).map((v) => (
+                        <span key={v.codigo} className="block whitespace-nowrap">
+                          <span className="cifra">{v.codigo}</span> {v.nombre}
+                          {v.naturaleza && (
+                            <span className="text-tinta-media">
+                              {" "}({v.naturaleza === "D" ? "débito" : "crédito"})
+                            </span>
+                          )}
+                        </span>
+                      ))}
                     </td>
                     <td className="cifra px-3 py-2 text-right">{monto(x.saldo_natural)}</td>
                   </tr>

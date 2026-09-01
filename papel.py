@@ -27,6 +27,7 @@ D = Decimal
 
 import analisis as A
 import db
+import reglas as R
 
 VERSION = "1.0"
 
@@ -136,6 +137,31 @@ def _cuentas_fuera_de_catalogo(carga_id: str, limite: int = 200) -> dict:
             LIMIT %s""",
         (carga_id, limite),
     )
+
+    # De dónde salió la naturaleza de cada una, y si el saldo la contradice.
+    # Esto es lo que convierte el control en algo accionable: que una cuenta
+    # no esté en el Decreto 2650 es casi siempre normal; lo que hay que
+    # revisar es que el signo supuesto sea el correcto, porque con ese signo
+    # entra al comparativo. Un saldo natural negativo significa que la cuenta
+    # está del lado contrario al que se le supuso.
+    exc = db.excepciones_naturaleza()
+    sclase = db.signo_por_clase()
+    nombres = db.nombres_puc()
+    for c in cuentas:
+        pre, _, declarado = R.origen_del_signo(c["codigo_puc"], exc, sclase)
+        c["prefijo_naturaleza"] = pre
+        c["naturaleza_declarada"] = declarado
+        c["heredada_de"] = nombres.get(pre)
+        c["saldo_contradice_naturaleza"] = D(str(c["saldo_natural"] or 0)) < 0
+        # El vecino de catálogo más cercano ayuda a juzgar: si 1590 se creó al
+        # lado de 1592 "Depreciación acumulada", que es de crédito, suponerle
+        # débito por la clase es probablemente un error.
+        hermanos = sorted(k for k in nombres
+                          if len(k) == 4 and k[:2] == c["codigo_puc"][:2])
+        cercanos = [k for k in hermanos if k < c["codigo_puc"]][-1:] +                    [k for k in hermanos if k > c["codigo_puc"]][:1]
+        c["vecinos_catalogo"] = [{"codigo": k, "nombre": nombres[k],
+                                  "naturaleza": exc.get(k)} for k in cercanos]
+
     return {"total": total, "cuentas": cuentas,
             "no_listadas": max(0, total - len(cuentas))}
 
@@ -311,15 +337,29 @@ def _controles_previos(enc: dict, contrato: list[dict]) -> list[dict]:
     # -- catálogo
     fuera = _cuentas_fuera_de_catalogo(por_tipo.get("BAL_ACTUAL", {}).get("carga_id"))
     peso = sum(abs(D(str(c["saldo_natural"] or 0))) for c in fuera["cuentas"])
-    detalle = "Todas las cuentas del corte existen en el catálogo."
+    contradicen = [c for c in fuera["cuentas"]
+                   if c["saldo_contradice_naturaleza"]]
+    detalle = ("Todas las cuentas del corte existen en el catálogo del "
+               "Decreto 2650.")
     if fuera["total"]:
         detalle = (
-            f"{fuera['total']} cuentas no están en el catálogo Decreto 2650, "
-            f"por {A._cop(peso)} en saldo natural. Puede ser normal -- el cliente "
-            "usa cuentas propias -- pero su naturaleza se resolvió heredando del "
-            "prefijo, no de una declaración explícita, y de esa naturaleza depende "
-            "el signo con que la cuenta entra al comparativo. Se listan abajo, de "
-            "mayor a menor saldo.")
+            f"{fuera['total']} cuentas del cliente no existen en el catálogo del "
+            f"Decreto 2650, por {A._cop(peso)} en saldo natural. Esto es normal y "
+            "esperado: el decreto es de 1993, las empresas abren cuentas propias, "
+            "y conceptos como la transición a NIIF no existían cuando se expidió. "
+            "No es un hallazgo por sí solo. "
+            "Lo que sí hay que revisar es la NATURALEZA: al no estar en el "
+            "catálogo, se les supuso débito o crédito heredando del prefijo, y con "
+            "ese signo entran al comparativo. Si el supuesto está mal, la variación "
+            "de esa cuenta sale con el signo invertido.")
+        if contradicen:
+            detalle += (
+                f" {len(contradicen)} de ellas tienen el saldo del lado CONTRARIO "
+                "al que se les supuso, lo que sugiere que la naturaleza heredada no "
+                "corresponde. Van marcadas abajo.")
+        else:
+            detalle += (" Ninguna tiene el saldo del lado contrario al supuesto, "
+                        "que es la señal de que el supuesto no corresponde.")
         if fuera["no_listadas"]:
             detalle += (f" {fuera['no_listadas']} no se enumeran: el listado se "
                         "acota, y decirlo es parte del control.")
@@ -328,6 +368,7 @@ def _controles_previos(enc: dict, contrato: list[dict]) -> list[dict]:
         "OK" if not fuera["total"] else "ALERTA", detalle,
         cifras={"fuera_de_catalogo": fuera["cuentas"],
                 "total_fuera": fuera["total"],
+                "contradicen_naturaleza": len(contradicen),
                 "no_listadas": fuera["no_listadas"]},
     ))
     return ctrl

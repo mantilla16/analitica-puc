@@ -365,13 +365,24 @@ def construir(p: dict) -> bytes:
                   "que la cuenta entra al comparativo.")
         _tabla(h, 4,
                ["Cuenta", "Nombre en el balance", "Clase",
-                "Naturaleza heredada", "Saldo final", "Saldo natural"],
+                "Naturaleza supuesta", "¿De dónde salió?",
+                "¿El saldo la contradice?", "Vecinos en el catálogo",
+                "Saldo final", "Saldo natural"],
                [[x["codigo_puc"], x["nombre_cuenta"], x["clase"],
                  "débito" if x["signo"] == 1 else "crédito",
+                 (f"declarada en {x['prefijo_naturaleza']}"
+                  if x.get("naturaleza_declarada")
+                  else f"heredada de la clase {x['clase']}"),
+                 "SÍ — revisar" if x.get("saldo_contradice_naturaleza") else "no",
+                 " · ".join(
+                     f"{v['codigo']} {v['nombre']}"
+                     + (f" ({'débito' if v['naturaleza'] == 'D' else 'crédito'})"
+                        if v.get("naturaleza") else "")
+                     for v in x.get("vecinos_catalogo") or []),
                  _num(x["saldo_final"]), _num(x["saldo_natural"])]
                 for x in fuera],
-               anchos=[11, 44, 8, 22, 20, 20],
-               formatos={5: PESOS, 6: PESOS}, principal=True)
+               anchos=[11, 44, 8, 20, 30, 24, 64, 20, 20],
+               formatos={8: PESOS, 9: PESOS}, principal=True)
 
     # ---------------------------------------------------- 6. alcance
     h = _hoja(wb, "Alcance", "Alcance y selección")
