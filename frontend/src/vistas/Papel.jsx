@@ -114,6 +114,35 @@ function Control({ c }) {
         </p>
         <p className="mt-1 text-xs leading-relaxed text-tinta-media">{c.detalle}</p>
         {(c.estado === "FALLA" || c.estado === "BLOQUEANTE") && <DetalleFalla c={c} />}
+        {c.cifras?.fuera_de_catalogo?.length > 0 && (
+          <div className="mt-2 overflow-x-auto rounded-[8px] border border-regla">
+            <table className="w-full text-xs">
+              <thead className="bg-papel-hondo">
+                <tr className="rotulo text-left">
+                  <th className="px-3 py-2 font-normal">Cuenta</th>
+                  <th className="px-3 py-2 font-normal">Nombre en el balance</th>
+                  <th className="px-3 py-2 font-normal">Naturaleza heredada</th>
+                  <th className="px-3 py-2 text-right font-normal">Saldo natural</th>
+                </tr>
+              </thead>
+              <tbody>
+                {c.cifras.fuera_de_catalogo.map((x) => (
+                  <tr key={x.codigo_puc} className="border-t border-regla-fina">
+                    <td className="cifra px-3 py-2 font-semibold">{x.codigo_puc}</td>
+                    <td className="px-3 py-2 text-tinta-media">
+                      {x.nombre_cuenta ?? "—"}
+                    </td>
+                    <td className="px-3 py-2 text-tinta-media">
+                      {x.signo === 1 ? "débito" : "crédito"}
+                      <span className="text-tinta-suave"> · heredada de la clase {x.clase}</span>
+                    </td>
+                    <td className="cifra px-3 py-2 text-right">{monto(x.saldo_natural)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
         {c.cifras?.cuentas_afectadas?.length > 0 && (
           <div className="mt-2 rounded-[8px] bg-rojo-tenue p-3">
             <p className="rotulo text-rojo">
@@ -406,7 +435,7 @@ export default function Papel({ encargoId, fase }) {
               </tr>
             </thead>
             <tbody>
-              {d.filas.filter((f) => f.significativa).map((f) => (
+              {d.filas.filter((f) => f.significativa).map((f) => [
                 <tr key={f.cuenta} className="border-b border-regla-fina">
                   <td className="cifra px-3 py-2">{f.cuenta}</td>
                   <td className="max-w-[12rem] truncate px-3 py-2" title={f.nombre}>{f.nombre}</td>
@@ -418,8 +447,9 @@ export default function Papel({ encargoId, fase }) {
                   </td>
                   <td className="px-3 py-2 text-xs">{f.motivo}</td>
                   <td className="cifra px-3 py-2 text-center">Δ</td>
-                </tr>
-              ))}
+                </tr>,
+                <Analisis key={`${f.cuenta}-ia`} o={p.observaciones?.[f.cuenta]} />,
+              ])}
             </tbody>
           </table>
         </div>
@@ -561,5 +591,57 @@ export default function Papel({ encargoId, fase }) {
         en la pestaña Variaciones y llevan su propia verificación de cifras.
       </p>
     </div>
+  );
+}
+
+
+/* -------------------------------------------------------------------- análisis
+
+   El análisis del modelo va PEGADO a la cifra que explica, no en una sección
+   aparte: un papel de trabajo se lee cuenta por cuenta, y una explicación a
+   diez páginas de su número no se lee.
+
+   Con su procedencia visible. Un texto redactado por un modelo sin decir qué
+   modelo, en qué versión, y si sus cifras se contrastaron contra el motor, no
+   es papel de trabajo: es una opinión de origen desconocido dentro de un
+   documento firmado.
+*/
+function Analisis({ o }) {
+  if (!o?.texto) return null;
+  const sinVerificar = o.cifras_no_verificadas ?? [];
+  return (
+    <tr className="border-b border-regla">
+      <td colSpan={8} className="px-3 pb-3">
+        <div className="rounded-[8px] border-l-2 border-cian bg-papel-hondo/60 px-3 py-2">
+          <p className="flex flex-wrap items-center gap-2">
+            <span className="rotulo">Análisis</span>
+            {o.verificado
+              ? <Chip tono="verde">cifras verificadas</Chip>
+              : <Chip tono="ambar">cifras sin verificar</Chip>}
+            {o.instruccion_auditor && <Chip tono="cian">reajustado por el auditor</Chip>}
+            <span className="text-xs text-tinta-suave">
+              {o.modelo} · v{o.version} · {fecha(o.creado_en)}
+              {o.creado_por ? ` · ${o.creado_por}` : ""}
+            </span>
+          </p>
+          <p className="mt-1.5 whitespace-pre-line text-xs leading-relaxed text-tinta">
+            {o.texto}
+          </p>
+          {sinVerificar.length > 0 && (
+            <p className="mt-1.5 text-xs text-ambar">
+              Cifras del texto que no coinciden con ninguna del motor:{" "}
+              <span className="cifra">{sinVerificar.join(", ")}</span>. Deben
+              revisarse antes de dar por buena la explicación.
+            </p>
+          )}
+          {o.instruccion_auditor && (
+            <p className="mt-1.5 text-xs text-tinta-suave">
+              <span className="rotulo">Instrucción del auditor: </span>
+              {o.instruccion_auditor}
+            </p>
+          )}
+        </div>
+      </td>
+    </tr>
   );
 }

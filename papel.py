@@ -23,6 +23,8 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 
+D = Decimal
+
 import analisis as A
 import db
 
@@ -108,20 +110,34 @@ def _descuadres_linea(carga_id: str) -> list[dict]:
     )
 
 
-def _cuentas_fuera_de_catalogo(carga_id: str) -> list[dict]:
-    """Cuentas del cliente que no existen en el catálogo PUC. No es un
-    error -- el cliente puede tener auxiliares propios -- pero sí algo que
-    el papel debe declarar en vez de callar."""
+def _cuentas_fuera_de_catalogo(carga_id: str, limite: int = 200) -> dict:
+    """Cuentas del cliente que no existen en el catálogo PUC. No es un error
+    -- el cliente puede tener cuentas propias -- pero sí algo que el papel
+    debe declarar, y con nombre y cifra: decir "hay 13 cuentas fuera del
+    catálogo" sin decir cuáles obliga al auditor a salir del papel a
+    buscarlas, y no le permite juzgar si importan.
+
+    Van ordenadas por saldo y no por código: lo que decide si una cuenta
+    fuera de catálogo es un problema es cuánto pesa, no su número.
+    """
     if not carga_id:
-        return []
-    return db.varios(
-        """SELECT b.codigo_puc, b.nombre_cuenta
-           FROM core.balance b
-           LEFT JOIN core.puc p ON p.codigo = b.codigo_puc
-           WHERE b.carga_id = %s AND b.nivel = 'Cuenta' AND p.codigo IS NULL
-           ORDER BY b.codigo_puc""",
-        (carga_id,),
+        return {"total": 0, "cuentas": [], "no_listadas": 0}
+
+    filtro = """FROM core.balance b
+                LEFT JOIN core.puc p ON p.codigo = b.codigo_puc
+                WHERE b.carga_id = %s AND b.nivel = 'Cuenta'
+                  AND p.codigo IS NULL"""
+    total = db.uno(f"SELECT count(*) AS n {filtro}", (carga_id,))["n"]
+    cuentas = db.varios(
+        f"""SELECT b.codigo_puc, b.nombre_cuenta, b.clase, b.signo,
+                   b.saldo_final, b.saldo_natural
+            {filtro}
+            ORDER BY abs(b.saldo_natural) DESC, b.codigo_puc
+            LIMIT %s""",
+        (carga_id, limite),
     )
+    return {"total": total, "cuentas": cuentas,
+            "no_listadas": max(0, total - len(cuentas))}
 
 
 # ====================================================== contrato de datos
@@ -294,14 +310,25 @@ def _controles_previos(enc: dict, contrato: list[dict]) -> list[dict]:
 
     # -- catálogo
     fuera = _cuentas_fuera_de_catalogo(por_tipo.get("BAL_ACTUAL", {}).get("carga_id"))
+    peso = sum(abs(D(str(c["saldo_natural"] or 0))) for c in fuera["cuentas"])
+    detalle = "Todas las cuentas del corte existen en el catálogo."
+    if fuera["total"]:
+        detalle = (
+            f"{fuera['total']} cuentas no están en el catálogo Decreto 2650, "
+            f"por {A._cop(peso)} en saldo natural. Puede ser normal -- el cliente "
+            "usa cuentas propias -- pero su naturaleza se resolvió heredando del "
+            "prefijo, no de una declaración explícita, y de esa naturaleza depende "
+            "el signo con que la cuenta entra al comparativo. Se listan abajo, de "
+            "mayor a menor saldo.")
+        if fuera["no_listadas"]:
+            detalle += (f" {fuera['no_listadas']} no se enumeran: el listado se "
+                        "acota, y decirlo es parte del control.")
     ctrl.append(_control(
         "P04", "✓", "Cuentas contra el catálogo PUC",
-        "OK" if not fuera else "ALERTA",
-        "Todas las cuentas del corte existen en el catálogo." if not fuera
-        else f"{len(fuera)} cuentas no están en el catálogo Decreto 2650. "
-             "Puede ser normal (el cliente usa cuentas propias) pero su naturaleza "
-             "se resolvió heredando de la clase, no de una declaración explícita.",
-        cifras={"cuentas": [f["codigo_puc"] for f in fuera[:20]]},
+        "OK" if not fuera["total"] else "ALERTA", detalle,
+        cifras={"fuera_de_catalogo": fuera["cuentas"],
+                "total_fuera": fuera["total"],
+                "no_listadas": fuera["no_listadas"]},
     ))
     return ctrl
 
@@ -590,6 +617,13 @@ def papel_trabajo(encargo_id: str, fase: str | None = None) -> dict:
         "gates": gates,
         "cedula_sumaria": A.resumen_clases(encargo_id, "BAL_ACTUAL"),
         "comparativo": d,
+        # El análisis redactado por el modelo, indexado por cuenta, para que
+        # la cédula de selección pueda mostrarlo junto a la cifra que explica.
+        # Viaja con su procedencia -- modelo, versión, si el auditor lo
+        # instruyó, si sus cifras se verificaron -- porque un texto de IA sin
+        # trazabilidad no es papel de trabajo.
+        "observaciones": {o["codigo_puc"]: o
+                          for o in A.observaciones_guardadas(encargo_id, d["fase"])},
         "hallazgos": hallazgos,
         "marcas": MARCAS,
         "riesgo": riesgo,

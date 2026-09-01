@@ -69,6 +69,15 @@ def _hoja(wb, nombre, titulo, subtitulo=None):
     return h
 
 
+def _fecha(v) -> str:
+    """Fecha legible. Las marcas de tiempo llegan como datetime desde la base,
+    pero un papel restaurado de un JSON las trae como texto."""
+    if not v:
+        return ""
+    return (v.strftime("%d/%m/%Y %H:%M") if hasattr(v, "strftime")
+            else str(v)[:16].replace("T", " "))
+
+
 def _tabla(h, fila_ini, columnas, filas, anchos=None, formatos=None,
            principal=False):
     """Escribe una tabla con encabezado.
@@ -245,7 +254,8 @@ def construir(p: dict) -> bytes:
             for x in cifras.get("documentos_descuadrados") or []:
                 detalle.append([
                     c["codigo"], "Falla", "Asiento del archivo de movimientos",
-                    x["num_doc"], f"{x['lineas']} líneas · {x['fecha']}",
+                    x["num_doc"],
+                    f"{x['lineas']} líneas · {_fecha(x['fecha'])}",
                     "los débitos del documento no igualan sus créditos: "
                     f"débito {x['debito']} contra crédito {x['credito']}",
                     _num(x["diferencia"])])
@@ -303,6 +313,65 @@ def construir(p: dict) -> bytes:
          for f in d["filas"]],
         anchos=[11, 40, 8, 30, 20, 20, 20, 10, 18, 8],
         formatos={5: PESOS, 6: PESOS, 7: PESOS, 8: PORC}, principal=True)
+
+    # ------------------------------------------- 5.b análisis del modelo
+    # Hoja aparte y no una columna del comparativo: el texto es largo y en
+    # una celda al lado de las cifras no se lee. Va con su procedencia --
+    # modelo, versión, si el auditor lo instruyó, si sus cifras se
+    # contrastaron contra el motor -- porque un texto de IA sin trazabilidad
+    # no es papel de trabajo.
+    obs = p.get("observaciones") or {}
+    analisis = []
+    for f in d["filas"]:
+        o = obs.get(f["cuenta"])
+        if not f["significativa"] or not o:
+            continue
+        sin_ver = o.get("cifras_no_verificadas") or []
+        analisis.append([
+            f["cuenta"], f["nombre"], _num(f["variacion"]), f["motivo"] or "",
+            o["texto"],
+            "Sí" if o.get("verificado") else "No",
+            ", ".join(str(x) for x in sin_ver),
+            o.get("modelo") or "", o.get("version"),
+            o.get("instruccion_auditor") or "",
+            o.get("creado_por") or "", _fecha(o.get("creado_en")),
+        ])
+    if analisis:
+        h = _hoja(wb, "Análisis", "Análisis de las variaciones",
+                  "Redactado por el modelo a partir de las cifras del motor y de "
+                  "los movimientos de cada cuenta. El modelo explica y escribe; "
+                  "no calcula. Las cifras que no se pudieron contrastar contra el "
+                  "motor se listan para revisión.")
+        _tabla(h, 4,
+               ["Cuenta", "Nombre", "Variación", "Motivo", "Análisis",
+                "¿Cifras verificadas?", "Cifras sin verificar", "Modelo",
+                "Versión", "Instrucción del auditor", "Generado por", "Fecha"],
+               analisis,
+               anchos=[11, 34, 20, 16, 110, 12, 26, 22, 9, 44, 18, 12],
+               formatos={3: PESOS}, principal=True)
+        for fila in range(5, 5 + len(analisis)):
+            h.cell(row=fila, column=5).alignment = Alignment(
+                wrap_text=True, vertical="top")
+            h.cell(row=fila, column=10).alignment = Alignment(
+                wrap_text=True, vertical="top")
+
+    # ------------------------------------- 5.c cuentas fuera de catálogo
+    fuera = next((c["cifras"].get("fuera_de_catalogo")
+                  for c in p["controles_previos"] if c["codigo"] == "P04"), None)
+    if fuera:
+        h = _hoja(wb, "Fuera de catálogo", "Cuentas fuera del catálogo PUC",
+                  "No existen en el Decreto 2650. Puede ser normal, pero su "
+                  "naturaleza se heredó del prefijo y de ella depende el signo con "
+                  "que la cuenta entra al comparativo.")
+        _tabla(h, 4,
+               ["Cuenta", "Nombre en el balance", "Clase",
+                "Naturaleza heredada", "Saldo final", "Saldo natural"],
+               [[x["codigo_puc"], x["nombre_cuenta"], x["clase"],
+                 "débito" if x["signo"] == 1 else "crédito",
+                 _num(x["saldo_final"]), _num(x["saldo_natural"])]
+                for x in fuera],
+               anchos=[11, 44, 8, 22, 20, 20],
+               formatos={5: PESOS, 6: PESOS}, principal=True)
 
     # ---------------------------------------------------- 6. alcance
     h = _hoja(wb, "Alcance", "Alcance y selección")
