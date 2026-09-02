@@ -75,9 +75,13 @@ UPDATE core.balance
    SET saldo_naturaleza = saldo_natural
  WHERE saldo_naturaleza IS NULL;
 
-UPDATE core.carga
+-- `naturaleza` no es columna de core.carga: viene del JOIN con core.insumo
+-- que hace db.carga(). Aquí hay que ir a la fuente.
+UPDATE core.carga c
    SET convencion_signo = 'CATALOGO'
- WHERE naturaleza = 'BALANCE' AND convencion_signo IS NULL;
+  FROM core.insumo i
+ WHERE i.tipo = c.tipo AND i.naturaleza = 'BALANCE'
+   AND c.convencion_signo IS NULL;
 
 -- ------------------------------------------------------ niveles que faltaban
 INSERT INTO core.nivel_cargable (nivel, digitos, es_comparativo,
