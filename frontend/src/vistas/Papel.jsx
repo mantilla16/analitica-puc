@@ -292,7 +292,16 @@ export default function Papel({ encargoId, fase }) {
             riesgo {p.riesgo.nivel}
           </Chip>
         </div>
-        <p className="max-w-4xl text-sm leading-relaxed">{p.conclusion.texto}</p>
+        {/* Por párrafos y no en un bloque: es el relato del procedimiento,
+            no una etiqueta. El último párrafo -- la conclusión propiamente --
+            va resaltado, porque es la frase que alguien firma. */}
+        <div className="max-w-4xl space-y-2.5 text-sm leading-relaxed">
+          {(p.conclusion.parrafos ?? [p.conclusion.texto]).map((par, i, todos) => (
+            <p key={i} className={i >= todos.length - 2 ? "font-medium" : ""}>
+              {par}
+            </p>
+          ))}
+        </div>
       </div>
 
       {/* --------------------------------------------- contrato de datos */}

@@ -167,7 +167,20 @@ def construir(p: dict) -> bytes:
     h.cell(row=fila, column=1, value="Riesgo").font = _rotulo
     h.cell(row=fila, column=2,
            value=f"{p['riesgo']['nivel']} ({p['riesgo']['puntos']} puntos)").font = _normal
-    fila = _bloque_texto(h, fila + 2, "Fundamento", con["texto"])
+    # Un párrafo por fila, no todo en una celda combinada: así se puede leer
+    # sin ampliar la fila a media pantalla, y se puede copiar suelto al
+    # informe. El texto es el mismo que muestra la pantalla.
+    fila += 2
+    h.cell(row=fila, column=1, value="Procedimiento y fundamento").font = _rotulo
+    fila += 1
+    for par in con.get("parrafos") or [con["texto"]]:
+        c = h.cell(row=fila, column=1, value=par)
+        c.font = _normal
+        c.alignment = Alignment(wrap_text=True, vertical="top")
+        h.merge_cells(start_row=fila, start_column=1, end_row=fila, end_column=8)
+        h.row_dimensions[fila].height = max(30, 13 * (len(par) // 110 + 1))
+        fila += 1
+    fila += 1
 
     # ------------------------------------------- 2. contrato de datos
     h = _hoja(wb, "Contrato de datos",

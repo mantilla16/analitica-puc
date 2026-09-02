@@ -26,6 +26,7 @@ from decimal import Decimal
 D = Decimal
 
 import analisis as A
+import conclusion as C
 import db
 import reglas as R
 
@@ -543,65 +544,6 @@ def _riesgo(gates: list[dict], previos: list[dict], d: dict) -> dict:
 
 # ============================================================== conclusión
 
-def _conclusion(gates: list[dict], previos: list[dict], riesgo: dict,
-                d: dict) -> dict:
-    """Se arma con los resultados, no se redacta a mano. Si un control que
-    constituye evidencia falló, no se concluye razonabilidad: se dice que
-    no se puede concluir.
-
-    Los controles previos también cuentan. Antes solo se miraban los gates,
-    de modo que un previo BLOQUEANTE -- un insumo ausente, un asiento que no
-    cuadra -- podía dejar el papel concluyendo razonabilidad sobre datos que
-    el propio papel había marcado como no aptos para cruzar.
-    """
-    evidencia = [g for g in gates if g["es_evidencia"]]
-    bloqueados = [c for c in previos if c["estado"] == "BLOQUEANTE"]
-    fallas = [g for g in evidencia if g["estado"] == "FALLA"] + bloqueados
-    sin_correr = [g for g in evidencia if g["estado"] == "NO_EJECUTADO"]
-
-    if fallas:
-        estado, texto = "NO_CONCLUYENTE", (
-            "No es posible concluir sobre la razonabilidad de las variaciones: "
-            + "; ".join(f"{g['nombre']} falló" for g in fallas)
-            + ". Antes de continuar debe resolverse el origen de esos descuadres, "
-              "porque el resto del análisis se apoya en cifras que no se sostienen."
-        )
-    elif not d.get("aplica"):
-        estado, texto = "NO_CONCLUYENTE", (
-            "No hay materialidad aplicada en la fase, de modo que ninguna cuenta "
-            "quedó seleccionada para revisión. El comparativo está calculado, pero "
-            "sin umbral no hay alcance definido ni conclusión que sostener."
-        )
-    else:
-        base = (
-            f"Se compararon {d['total_cuentas']} cuentas a nivel de cuenta "
-            f"(4 dígitos) y se seleccionaron {d['significativas']} para revisión, "
-            "aplicando la materialidad de la fase y los criterios de selección "
-            "vigentes. Los controles de cuadre ejecutados no arrojaron excepciones."
-        )
-        if sin_correr:
-            base += (
-                " Sin embargo, " + " y ".join(g["nombre"].lower() for g in sin_correr)
-                + " no pudo ejecutarse, de modo que las cifras no están contrastadas "
-                  "contra una fuente independiente."
-            )
-        if d.get("residuo_supera_umbral"):
-            base += (
-                " El conjunto de variaciones no seleccionadas supera la materialidad "
-                "de la fase, por lo que el alcance debe ampliarse o dejarse constancia "
-                "de por qué se acepta ese residuo."
-            )
-        estado = "RAZONABLE_CON_SALVEDADES" if (sin_correr or d.get("residuo_supera_umbral")) \
-            else "RAZONABLE"
-        texto = base
-
-    return {"estado": estado, "texto": texto,
-            "riesgo": riesgo["nivel"],
-            "controles_evidencia": len(evidencia),
-            "controles_fallidos": len(fallas),
-            "controles_no_ejecutados": len(sin_correr)}
-
-
 # ============================================================== ensamblado
 
 def papel_trabajo(encargo_id: str, fase: str | None = None) -> dict:
@@ -668,7 +610,7 @@ def papel_trabajo(encargo_id: str, fase: str | None = None) -> dict:
         "hallazgos": hallazgos,
         "marcas": MARCAS,
         "riesgo": riesgo,
-        "conclusion": _conclusion(gates, previos, riesgo, d),
+        "conclusion": C.armar(enc, contrato, gates, previos, riesgo, d),
         "trazabilidad": {
             "eventos": db.bitacora(encargo_id=encargo_id, limite=300),
             "observaciones_ia": db.historia_observaciones_ia(enc["cliente_id"]),
