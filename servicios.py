@@ -148,7 +148,14 @@ def cotejar(carga_id: str) -> dict:
                 "cotejo_id": cot["id"]}
 
     # --- archivo idéntico
-    if prev["hash_sha256"] == c["hash_sha256"]:
+    # El perfil entra en la comparación porque los MISMOS bytes leídos con
+    # otro mapeo no son el mismo dato. Sin esto, corregir un mapeo
+    # equivocado era imposible: al volver a subir el archivo se disparaba el
+    # atajo de "archivo idéntico" y el insumo quedaba apuntando de vuelta a
+    # la carga vieja, con el mapeo malo, sin decir una palabra.
+    mismo_archivo = prev["hash_sha256"] == c["hash_sha256"]
+    mismo_mapeo = prev["perfil_id"] == c["perfil_id"]
+    if mismo_archivo and mismo_mapeo:
         msg = (f"Archivo idéntico al cargado el "
                f"{prev['fecha_carga']:%d/%m/%Y}. No se procesó.")
         cot = db.crear_cotejo(
@@ -220,7 +227,13 @@ def cotejar(carga_id: str) -> dict:
                 continue
             fec = _fecha(f)
             # Un balance de periodo cerrado que cambia está fuera por definición.
-            if nat == "MOVIMIENTO":
+            if mismo_archivo:
+                # Mismo archivo, otro mapeo: el cliente no tocó nada. Contar
+                # esto como "cambios en periodo ya auditado" sería una alarma
+                # falsa, y de las peores: acusa de manipulación lo que fue una
+                # corrección nuestra.
+                es_fuera = False
+            elif nat == "MOVIMIENTO":
                 es_fuera = bool(corte and fec and fec < corte)
             else:
                 es_fuera = bool(corte and c["periodo_fin"] and c["periodo_fin"] < corte)
@@ -238,6 +251,10 @@ def cotejar(carga_id: str) -> dict:
 
     msg = (f"{len(dif['nuevas'])} nuevas, {len(dif['modificadas'])} modificadas, "
            f"{len(dif['eliminadas'])} eliminadas. {fuera} fuera del periodo auditado.")
+    if mismo_archivo:
+        msg = ("Es el MISMO archivo del cliente, leído con un mapeo de columnas "
+               "distinto: lo que cambió es de qué columna sale cada cifra, no "
+               "los datos. " + msg)
 
     cot = db.crear_cotejo(
         carga_nueva=carga_id, carga_previa=prev["id"],
