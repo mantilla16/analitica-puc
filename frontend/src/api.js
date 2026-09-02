@@ -56,6 +56,8 @@ export const api = {
     pedir(`/encargos/${encargoId}/cargas`, { method: "POST", body: form }),
 
   mapeo: (cargaId) => pedir(`/cargas/${cargaId}/mapeo`),
+  remapear: (encargoId, tipo) =>
+    pedir(`/encargos/${encargoId}/insumos/${tipo}/remapear`, { method: "POST" }),
   confirmarMapeo: (cargaId, d) => pedir(`/cargas/${cargaId}/mapeo`, json("POST", d)),
   procesar: (cargaId) =>
     pedir(`/cargas/${cargaId}/procesar?sincrono=true`, { method: "POST" }),

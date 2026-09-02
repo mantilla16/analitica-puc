@@ -286,6 +286,27 @@ def perfil_vigente(cliente_id: str, tipo: str) -> dict | None:
     )
 
 
+def invalidar_perfil(cliente_id: str, tipo: str) -> int:
+    """Deja sin vigencia el perfil de mapeo de un insumo.
+
+    Hace falta porque el perfil se reutiliza en silencio: una vez guardado,
+    volver a subir el archivo NO vuelve a preguntar el mapeo, y un mapeo mal
+    hecho quedaba sin forma de corregirse desde la aplicación. Pasó de
+    verdad -- el sugeridor eligió la columna de saldo actual en vez de la de
+    movimiento del periodo, y las 50 cuentas salieron descuadradas.
+
+    No se borra la fila: queda el historial de qué mapeo se usó y cuándo, que
+    es parte de la trazabilidad del papel.
+    """
+    with conn() as c:
+        n = c.execute(
+            """UPDATE core.perfil_mapeo SET vigente=false
+                WHERE cliente_id=%s AND tipo=%s AND vigente""",
+            (cliente_id, tipo)).rowcount
+        c.commit()
+    return n
+
+
 def guardar_perfil(cliente_id: str, tipo: str, mapeo: dict,
                    usuario: str | None) -> dict:
     with conn() as c:

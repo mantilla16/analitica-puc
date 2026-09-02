@@ -204,6 +204,25 @@ export default function Encargo({ encargoId, onVolver }) {
               )}
               {i.estado === "RECHAZADA" && <Chip tono="rojo">rechazada</Chip>}
 
+              {/* El mapeo guardado se reutiliza en silencio en cada carga.
+                  Sin este botón, un mapeo equivocado -- el sugeridor puede
+                  elegir la columna de saldo en vez de la de movimiento -- no
+                  tenía forma de corregirse desde la aplicación. */}
+              {i.cargado && (
+                <button
+                  onClick={async () => {
+                    const r = await api.remapear(encargoId, i.tipo);
+                    setError(null);
+                    setResultado(null);
+                    alert(r.mensaje);
+                    await refrescar();
+                  }}
+                  title="Olvida el mapeo de columnas guardado para este insumo"
+                  className="btn-texto shrink-0 text-xs">
+                  Rehacer mapeo
+                </button>
+              )}
+
               <label className="btn btn-contorno btn-chico shrink-0 cursor-pointer">
                 {i.cargado ? "Reemplazar" : "Subir"}
                 <input

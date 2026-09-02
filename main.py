@@ -79,6 +79,7 @@ ACCIONES = [
     ("DELETE", r"^/encargos/[^/]+$",                  "ENCARGO_BORRADO",      "encargo"),
     ("POST",   r"^/encargos/[^/]+/cargas$",           "ARCHIVO_SUBIDO",       "carga"),
     ("POST",   r"^/cargas/[^/]+/mapeo$",              "MAPEO_CONFIRMADO",     "carga"),
+    ("POST",   r"/insumos/[^/]+/remapear$",            "MAPEO_INVALIDADO",     "encargo"),
     ("POST",   r"^/cargas/[^/]+/procesar$",           "CARGA_PROCESADA",      "carga"),
     ("POST",   r"^/cargas/[^/]+/promover$",           "BALANCE_PROMOVIDO",    "carga"),
     ("PUT",    r"^/encargos/[^/]+/materialidades/",   "MATERIALIDAD_GUARDADA","encargo"),
@@ -542,6 +543,25 @@ async def subir(
     finally:
         if temporal.exists():
             temporal.unlink()
+
+
+@app.post("/encargos/{encargo_id}/insumos/{tipo}/remapear")
+def remapear(encargo_id: str, tipo: str, request: Request) -> dict:
+    """Olvida el mapeo guardado de este insumo, para poder rehacerlo.
+
+    El perfil se reutiliza en silencio en cada carga, así que sin esto un
+    mapeo equivocado no tenía salida desde la aplicación.
+    """
+    enc = db.encargo(encargo_id)
+    if not enc:
+        raise HTTPException(404, "El encargo no existe")
+    n = db.invalidar_perfil(enc["cliente_id"], tipo)
+    request.state.bitacora = {"tipo": tipo, "perfiles_invalidados": n}
+    return {"ok": True, "invalidados": n,
+            "mensaje": ("El mapeo quedó sin vigencia. Vuelva a subir el "
+                        "archivo y el sistema le pedirá el mapeo de nuevo."
+                        if n else
+                        "Este insumo no tenía un mapeo guardado.")}
 
 
 @app.get("/cargas/{carga_id}/mapeo")
