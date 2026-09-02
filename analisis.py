@@ -107,7 +107,9 @@ def _saldos_cuenta(carga_id: str) -> dict[str, dict]:
     if not carga_id:
         return {}
     filas = db.varios(
-        """SELECT codigo_puc, nombre_cuenta, clase, saldo_natural, saldo_final
+        """SELECT codigo_puc, nombre_cuenta, clase, saldo_natural,
+                  coalesce(saldo_naturaleza, saldo_natural) AS saldo_naturaleza,
+                  saldo_final
            FROM core.balance WHERE carga_id=%s AND nivel='Cuenta'""",
         (carga_id,),
     )
@@ -189,9 +191,16 @@ def variaciones(encargo_id: str, fase: str | None = None) -> dict:
         var = (sa - sc).quantize(Decimal("0.01"))
         pctv = ((sa - sc) / abs(sc) * 100).quantize(Decimal("0.01")) if sc else None
 
+        # La naturaleza se juzga con `saldo_naturaleza`, no con la cifra
+        # comparable: en un archivo que ya trae los signos aplicados, todo
+        # pasivo tiene saldo comparable negativo y marcarlo como naturaleza
+        # invertida sería señalar como excepción lo normal.
+        nat = (Decimal(act[cod]["saldo_naturaleza"]) if cod in act
+               else Decimal(comparativo[cod]["saldo_naturaleza"])
+               if cod in comparativo else Decimal(0))
         motivo = R.motivo_seleccion(sa, sc, var, pctv,
                                     umbral if aplica else None,
-                                    trivial, pct_var, usa_var)
+                                    trivial, pct_var, usa_var, naturaleza=nat)
 
         filas.append({
             "cuenta": cod,
@@ -357,10 +366,15 @@ def _auxiliares_variacion(act_id: str, comparativo_id: str, codigo: str,
         if not carga_id:
             return {}
         filas = db.varios(
+            # El nivel más granular de ESTE archivo, no el nombre 'Auxiliar':
+            # unos ERP bajan a 8 dígitos y otros a 9, y con el nombre fijo el
+            # desglose salía vacío para los segundos sin decir por qué.
             """SELECT codigo_puc, nombre_cuenta, saldo_natural
                FROM core.balance
-               WHERE carga_id=%s AND nivel='Auxiliar' AND left(codigo_puc,%s)=%s""",
-            (carga_id, len(codigo), codigo),
+               WHERE carga_id=%s AND left(codigo_puc,%s)=%s
+                 AND digitos = (SELECT max(digitos) FROM core.balance
+                                 WHERE carga_id=%s)""",
+            (carga_id, len(codigo), codigo, carga_id),
         )
         return {f["codigo_puc"]: f for f in filas}
 

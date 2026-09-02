@@ -303,6 +303,14 @@ def promover_balance(carga_id: str) -> dict:
     sclase = db.signo_por_clase()
 
     crudo = db.staging_balance(carga_id)
+
+    # Cómo trae este archivo los saldos se COMPRUEBA, no se configura: se
+    # prueban las dos hipótesis y gana la que hace cuadrar las clases en
+    # cero. Un parámetro que alguien puede poner mal sería un descuadre
+    # esperando ocurrir, y aquí hay una prueba objetiva disponible.
+    convencion, sumas = R.convencion_signo(crudo, sclase)
+    ya_con_signo = convencion == "ARCHIVO"
+
     filas, descartadas = [], 0
 
     for s in crudo:
@@ -317,6 +325,13 @@ def promover_balance(carga_id: str) -> dict:
 
         signo = R.resolver_signo(cod, exc, sclase)
         sf = Decimal(s["saldo_final"] or 0)
+        # Dos cifras distintas y hace falta separarlas: `saldo_natural` es la
+        # COMPARABLE -- la que suma cero y con la que se calculan las
+        # variaciones -- y `saldo_naturaleza` dice de qué lado está el saldo
+        # frente a su naturaleza. Con la convención del catálogo coinciden;
+        # con la del archivo difieren en signo para pasivo, patrimonio e
+        # ingresos, y confundirlas marcaría todos los pasivos de ese cliente
+        # como naturaleza invertida.
         filas.append({
             "codigo_puc": cod, "nombre_cuenta": s["nombre_cuenta"],
             "nivel": niv["nivel"], "digitos": len(cod),
@@ -326,10 +341,13 @@ def promover_balance(carga_id: str) -> dict:
             "saldo_inicial": Decimal(s["saldo_inicial"] or 0),
             "debito": Decimal(s["debito"] or 0),
             "credito": Decimal(s["credito"] or 0),
-            "saldo_final": sf, "signo": signo, "saldo_natural": sf * signo,
+            "saldo_final": sf, "signo": signo,
+            "saldo_natural": sf if ya_con_signo else sf * signo,
+            "saldo_naturaleza": sf * signo,
         })
 
     n = db.promover_balance(carga_id, c["cliente_id"], filas)
+    db.actualizar_carga(carga_id, convencion_signo=convencion)
 
     cuadre = R.cuadre_por_nivel(filas, niveles)
     lineas = R.cuadre_por_linea(filas)
@@ -368,4 +386,5 @@ def promover_balance(carga_id: str) -> dict:
             )
 
     return {"promovidas": n, "descartadas": descartadas,
-            "cuadre": cuadre, "descuadres_linea": len(lineas)}
+            "cuadre": cuadre, "descuadres_linea": len(lineas),
+            "convencion_signo": convencion, "sumas_convencion": sumas}

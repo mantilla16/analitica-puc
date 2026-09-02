@@ -447,7 +447,8 @@ def staging_por_llaves(carga_id: str, naturaleza: str,
 def promover_balance(carga_id: str, cliente_id: str, filas: list[dict]) -> int:
     cols = ["carga_id", "cliente_id", "codigo_puc", "nombre_cuenta", "nivel",
             "digitos", "clase", "cuenta", "subcuenta", "saldo_inicial",
-            "debito", "credito", "saldo_final", "signo", "saldo_natural"]
+            "debito", "credito", "saldo_final", "signo", "saldo_natural",
+            "saldo_naturaleza"]
     with conn() as c:
         with c.cursor() as cur:
             cur.execute("DELETE FROM core.balance WHERE carga_id=%s", (carga_id,))

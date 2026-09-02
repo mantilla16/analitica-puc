@@ -149,6 +149,56 @@ def marcar_huellas(filas: Iterable[dict], naturaleza: str):
         yield f
 
 
+def convencion_signo(filas, signo_clase: dict[str, int]
+                     ) -> tuple[str, dict[str, str]]:
+    """Cómo trae el archivo los saldos: ¿en positivo, o ya con signo?
+
+    No es un parámetro de configuración: es una pregunta con respuesta
+    comprobable. Un balance completo suma cero, así que se prueban las dos
+    hipótesis sobre las cuentas de CLASE y gana la que cuadra.
+
+    · CATALOGO  -- el archivo trae todo en positivo (pasivos incluidos) y el
+      signo hay que tomarlo del catálogo. Es lo que entrega LIQUITECH.
+    · ARCHIVO   -- el archivo ya trae pasivos, patrimonio e ingresos en
+      negativo, y sus clases suman cero tal cual. Es lo que entrega FGC.
+    · INDETERMINADA -- ninguna cuadra. Se declara; no se elige la menos mala.
+
+    Se mide sobre las clases (un dígito) porque es el nivel que siempre
+    existe y el que menos filas tiene: si el árbol es consistente, cuadrar
+    ahí equivale a cuadrar en cualquier nivel completo.
+
+    Devuelve la convención y las dos sumas, para poder mostrarlas: una
+    detección que no dice cuánto dio cada hipótesis no se puede auditar.
+    """
+    crudo = Decimal(0)
+    con_signo = Decimal(0)
+    clases = 0
+    for f in filas:
+        cod = (f.get("codigo_puc") or "").strip()
+        if len(cod) != 1 or not cod.isdigit():
+            continue
+        clases += 1
+        sf = Decimal(str(f.get("saldo_final") or 0))
+        crudo += sf
+        con_signo += sf * signo_clase.get(cod, 1)
+
+    crudo = crudo.quantize(Decimal("0.01"))
+    con_signo = con_signo.quantize(Decimal("0.01"))
+    sumas = {"clases": clases, "suma_tal_cual": str(crudo),
+             "suma_con_signo_del_catalogo": str(con_signo)}
+
+    if not clases:
+        return "INDETERMINADA", sumas
+    # El orden importa cuando las dos cuadran, que pasa si el balance está
+    # todo en cero: se prefiere CATALOGO por ser el comportamiento anterior,
+    # y así un archivo vacío no cambia de convención de una carga a otra.
+    if con_signo == 0:
+        return "CATALOGO", sumas
+    if crudo == 0:
+        return "ARCHIVO", sumas
+    return "INDETERMINADA", sumas
+
+
 # ------------------------------------------------------ motivo de selección
 
 MOTIVOS = ("Monto", "Cuenta nueva", "Cuenta cerrada", "Comportamiento",
@@ -158,7 +208,8 @@ MOTIVOS = ("Monto", "Cuenta nueva", "Cuenta cerrada", "Comportamiento",
 def motivo_seleccion(sa: Decimal, sc: Decimal, var: Decimal,
                      pctv: Decimal | None, umbral: Decimal | None,
                      trivial: Decimal, pct_var: Decimal,
-                     usa_var: bool) -> str | None:
+                     usa_var: bool,
+                     naturaleza: Decimal | None = None) -> str | None:
     """Por qué una cuenta entra al alcance, o None si no entra.
 
     Estaba dentro de `variaciones`, entre las consultas y el armado de la
@@ -180,7 +231,13 @@ def motivo_seleccion(sa: Decimal, sc: Decimal, var: Decimal,
         return "Cuenta cerrada"
     if usa_var and pctv is not None and abs(pctv) >= pct_var and abs(var) >= trivial:
         return "Comportamiento"
-    if sa < 0 and abs(sa) >= trivial:
+    # `naturaleza` es el saldo frente al signo del CATÁLOGO, que no siempre
+    # coincide con el saldo comparable: si el archivo ya trae los signos
+    # aplicados, todo pasivo tiene saldo comparable negativo y usarlo aquí
+    # marcaría como excepción lo que es normal. Cuando no se pasa, se cae al
+    # saldo comparable, que es el comportamiento anterior.
+    nat = sa if naturaleza is None else naturaleza
+    if nat < 0 and abs(nat) >= trivial:
         return "Naturaleza"
     return None
 

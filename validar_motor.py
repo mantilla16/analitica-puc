@@ -258,6 +258,19 @@ def validar_motivos() -> None:
          None, m("600", "500", usa_var=False))
     caso("motivo · saldo natural negativo marca Naturaleza",
          "Naturaleza", m("-500", "-450"))
+
+    # La naturaleza se juzga contra el signo del CATÁLOGO, que en un archivo
+    # que ya trae los signos aplicados no coincide con el saldo comparable.
+    # Sin esta separación, todo pasivo de ese cliente saldría como excepción.
+    caso("motivo · pasivo con saldo comparable negativo pero naturaleza "
+         "correcta NO marca",
+         None,
+         R.motivo_seleccion(D("-500"), D("-450"), D("-50"), D("11.11"),
+                            U, T, PV, True, naturaleza=D("500")))
+    caso("motivo · naturaleza negativa marca aunque el comparable sea positivo",
+         "Naturaleza",
+         R.motivo_seleccion(D("500"), D("450"), D("50"), D("11.11"),
+                            U, T, PV, True, naturaleza=D("-500")))
     caso("motivo · sin materialidad no se marca nada",
          None, R.motivo_seleccion(D("999999999999"), D(0), D("999999999999"),
                                   None, None, D(0), PV, True))
