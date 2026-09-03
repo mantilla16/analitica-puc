@@ -24,6 +24,33 @@ from openpyxl import load_workbook
 MAX_FILAS_ESCANEO = 30
 MIN_CELDAS_ENCABEZADO = 4
 
+# Un .xlsx declara en `<dimension ref="...">` qué rango usa, y openpyxl en
+# modo read_only le CREE: `iter_rows` recorta cada fila a la última columna
+# declarada. Varios ERP escriben ese rango mal -- el movimiento auxiliar de
+# DOXA declara `A1:A27591` teniendo 16 columnas -- y el efecto es que el
+# archivo llega con una sola columna: sin encabezado que reconocer, o peor,
+# con la primera columna buena y las demás en blanco. Es la forma más pura
+# del error silencioso: el archivo miente sobre su propia forma y nada lo
+# contradice.
+#
+# La salida está en la misma línea de openpyxl que causa el problema
+# (`max_col = max_col or self.max_column`): pasando el ancho explícito, la
+# dimensión declarada deja de consultarse. Se leen 64 columnas -- las que no
+# existen vuelven como None, que es lo que ya se ignora -- y se compara
+# contra lo declarado para poder decirlo.
+MAX_COLUMNAS = 64
+
+
+def _filas(ws, min_row: int = 1, max_row: int | None = None):
+    """`iter_rows` sin creerle la dimensión que declara el archivo."""
+    return ws.iter_rows(min_row=min_row, max_row=max_row,
+                        max_col=MAX_COLUMNAS, values_only=True)
+
+
+def _dimension_declarada(ws) -> tuple[int, int]:
+    """(filas, columnas) según el propio archivo. 0 si no lo declara."""
+    return (ws.max_row or 0), (ws.max_column or 0)
+
 TOKENS_TRUE = {"si", "s", "x", "1", "true", "verdadero", "sí"}
 
 PREFIJOS_DESCARTE = (
@@ -146,8 +173,7 @@ def _detectar_encabezado(ws) -> tuple[int | None, list[dict]]:
     """Fila con más celdas de texto: es el encabezado. Devuelve (fila, columnas)."""
     mejor_fila, mejor_puntaje, mejor_celdas = None, 0, []
 
-    for i, fila in enumerate(ws.iter_rows(max_row=MAX_FILAS_ESCANEO,
-                                          values_only=True), start=1):
+    for i, fila in enumerate(_filas(ws, max_row=MAX_FILAS_ESCANEO), start=1):
         if not fila:
             continue
         celdas = [
@@ -186,15 +212,24 @@ def inspeccionar(
 
         muestra = []
         if fila_enc:
-            for fila in ws.iter_rows(min_row=fila_enc + 1,
-                                     max_row=fila_enc + filas_muestra,
-                                     values_only=True):
+            for fila in _filas(ws, min_row=fila_enc + 1,
+                               max_row=fila_enc + filas_muestra):
                 muestra.append([
                     None if v is None else str(v)[:60]
                     for v in (fila or ())
                 ])
 
         reconocidos = sum(1 for c in columnas if norm(c["texto"]) in sinonimos)
+
+        # Que el archivo mienta sobre su ancho no se calla: es un dato sobre
+        # la fuente, y el auditor tiene que saber que lo leido no coincide
+        # con lo que el archivo declara de si mismo.
+        _, col_declaradas = _dimension_declarada(ws)
+        col_reales = max((c["indice"] for c in columnas), default=-1) + 1
+        for f in muestra:
+            col_reales = max(col_reales,
+                             max((j + 1 for j, v in enumerate(f)
+                                  if v is not None), default=0))
 
         hojas.append({
             "hoja": nombre,
@@ -204,6 +239,9 @@ def inspeccionar(
             "columnas": columnas,
             "reconocidos": reconocidos,
             "muestra": muestra,
+            "columnas_declaradas": col_declaradas,
+            "columnas_reales": col_reales,
+            "dimension_mal_declarada": col_reales > col_declaradas > 0,
         })
 
     wb.close()
@@ -286,10 +324,8 @@ def parsear(ruta: str | Path, perfil: dict, naturaleza: str) -> Iterator[dict]:
 
             n_col = max(idx.values()) + 1
 
-            for n, fila in enumerate(
-                ws.iter_rows(min_row=fila_enc + 1, values_only=True),
-                start=fila_enc + 1,
-            ):
+            for n, fila in enumerate(_filas(ws, min_row=fila_enc + 1),
+                                     start=fila_enc + 1):
                 if not fila:
                     continue
                 fila = tuple(fila) + (None,) * (n_col - len(fila))

@@ -80,7 +80,9 @@ def pantalla_mapeo(carga_id: str) -> dict:
         "naturaleza": nat,
         "campos_estandar": db.campos_estandar(nat),
         "hojas": [
-            {k: h[k] for k in ("hoja", "fila_encabezado", "encabezados", "reconocidos")}
+            {k: h[k] for k in ("hoja", "fila_encabezado", "encabezados",
+                               "reconocidos", "columnas_declaradas",
+                               "columnas_reales", "dimension_mal_declarada")}
             for h in est["hojas"]
         ],
         "hoja_sugerida": est["hoja_sugerida"],

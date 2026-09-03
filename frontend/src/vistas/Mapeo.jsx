@@ -66,6 +66,22 @@ export default function Mapeo({ cargaId, onListo, onCancelar }) {
         </p>
       </div>
 
+      {/* Un archivo que declara mal su propio ancho leia una sola columna:
+          el formulario salia sin ninguna opcion que escoger y no habia forma
+          de saber por que. Ahora se lee igual y se dice. */}
+      {hojaActual?.dimension_mal_declarada && (
+        <div className="mb-6">
+          <Aviso tono="alerta" titulo="El archivo declara mal su tamaño">
+            La hoja <span className="cifra">{hojaActual.hoja}</span> dice usar{" "}
+            <span className="cifra">{hojaActual.columnas_declaradas}</span>{" "}
+            columna{hojaActual.columnas_declaradas === 1 ? "" : "s"} pero tiene{" "}
+            <span className="cifra">{hojaActual.columnas_reales}</span>. Se leyó
+            el ancho real; es un defecto del sistema que exportó el archivo, no
+            de los datos.
+          </Aviso>
+        </div>
+      )}
+
       {datos.hojas.length > 1 && (
         <label className="mb-6 block max-w-xs">
           <span className="rotulo">Hoja</span>
