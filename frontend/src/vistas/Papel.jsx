@@ -338,6 +338,17 @@ export default function Papel({ encargoId, fase }) {
                       {c.subido_por ?? "—"} el {fecha(c.fecha_carga)}</p>
                   </div>
 
+                  {c.excluido?.length > 0 && (
+                    <div className="mt-3 border-t border-regla-fina pt-2">
+                      <p className="rotulo mb-1">Qué quedó por fuera del análisis</p>
+                      {c.excluido.map((e, k) => (
+                        <p key={k} className="text-xs leading-relaxed text-tinta-media">
+                          {e.descripcion}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+
                   {Object.keys(c.columnas).length > 0 && (
                     <div className="mt-3 border-t border-regla-fina pt-2">
                       <p className="rotulo mb-1">Origen de cada campo</p>

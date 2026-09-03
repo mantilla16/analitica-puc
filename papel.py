@@ -213,8 +213,27 @@ def _contrato_datos(encargo_id: str) -> list[dict]:
             "estado": c["estado"],
             "subido_por": c["subido_por"],
             "fecha_carga": c["fecha_carga"],
+            # Leidas menos promovidas no es una resta que el auditor deba
+            # hacer de cabeza ni un numero que deba creer: se dice qué se
+            # dejó por fuera. En DOXA son las cuentas de 10 dígitos, que el
+            # encargo excluye a propósito -- las clases solo suman cero sin
+            # ellas -- y un papel que lo omite se lee como si hubiera
+            # analizado el archivo completo.
+            "excluido": _excluido(i["carga_id"]) if i["tipo"].startswith("BAL") else [],
         })
     return filas
+
+
+def _excluido(carga_id: str) -> list[dict]:
+    """Qué filas del archivo no llegaron al análisis, y por qué."""
+    return db.varios(
+        """SELECT tipo, descripcion FROM core.hallazgo
+            WHERE carga_id=%s
+              AND tipo IN ('NIVEL_NO_CARGABLE', 'CODIGO_NO_CONTABLE',
+                           'CODIGO_REPETIDO')
+            ORDER BY tipo""",
+        (carga_id,),
+    )
 
 
 # ================================================ controles antes de cruzar

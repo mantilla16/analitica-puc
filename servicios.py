@@ -351,16 +351,26 @@ def promover_balance(carga_id: str) -> dict:
     convencion, sumas = R.convencion_signo(crudo, sclase)
     ya_con_signo = convencion == "ARCHIVO"
 
+    # No basta contar cuantas filas se dejaron por fuera: hay que decir de
+    # que longitud eran. El balance de DOXA trae 111 cuentas de 10 digitos
+    # que el catalogo no reconoce, y excluirlas es lo correcto -- es la
+    # instruccion del encargo, y las clases solo suman cero sin ellas --
+    # pero un papel que no lo declara deja al auditor creyendo que analizo
+    # el archivo completo.
     filas, descartadas = [], 0
+    fuera_por_digitos: dict[int, int] = {}
+    fuera_por_codigo = 0
 
     for s in crudo:
         cod = (s["codigo_puc"] or "").strip()
         if not cod or not cod.isdigit() or not ("1" <= cod[0] <= "7"):
             descartadas += 1
+            fuera_por_codigo += 1
             continue
         niv = por_digitos.get(len(cod))
         if niv is None:                     # Grupo y Subauxiliar no se cargan
             descartadas += 1
+            fuera_por_digitos[len(cod)] = fuera_por_digitos.get(len(cod), 0) + 1
             continue
 
         signo = R.resolver_signo(cod, exc, sclase)
@@ -401,6 +411,31 @@ def promover_balance(carga_id: str) -> dict:
     db.actualizar_carga(carga_id, filas_cargadas=n, estado=estado)
 
     TOPE = 50   # el detalle se acota para no inundar la tabla de hallazgos
+
+    # Lo que se dejo por fuera, dicho por longitud de codigo. Es INFORMATIVO
+    # porque excluir un nivel que el catalogo no reconoce es el
+    # comportamiento correcto; lo que no es correcto es no decirlo.
+    if fuera_por_digitos:
+        detalle = " · ".join(f"{n} filas de {d} digitos"
+                             for d, n in sorted(fuera_por_digitos.items()))
+        cargables = ", ".join(str(d) for d in sorted(por_digitos))
+        db.crear_hallazgo(
+            encargo_id=c["encargo_id"], carga_id=carga_id,
+            tipo="NIVEL_NO_CARGABLE", severidad="INFORMATIVO",
+            descripcion=(f"Se excluyeron {sum(fuera_por_digitos.values())} filas "
+                         f"por tener una longitud de codigo que el catalogo no "
+                         f"reconoce como nivel: {detalle}. El catalogo carga "
+                         f"codigos de {cargables} digitos. El analisis y el "
+                         f"cuadre se hicieron SIN esas filas."),
+        )
+    if fuera_por_codigo:
+        db.crear_hallazgo(
+            encargo_id=c["encargo_id"], carga_id=carga_id,
+            tipo="CODIGO_NO_CONTABLE", severidad="INFORMATIVO",
+            descripcion=(f"Se excluyeron {fuera_por_codigo} filas cuyo codigo "
+                         f"esta vacio, no es numerico o no empieza por 1-7 "
+                         f"(titulos, subtotales, cortes de pagina)."),
+        )
 
     for d in duplicados[:TOPE]:
         if d["trato"] == "IDENTICA":
@@ -455,6 +490,8 @@ def promover_balance(carga_id: str) -> dict:
             )
 
     return {"promovidas": n, "descartadas": descartadas,
+            "fuera_por_digitos": fuera_por_digitos,
+            "fuera_por_codigo": fuera_por_codigo,
             "cuadre": cuadre, "descuadres_linea": len(lineas),
             "duplicados": len(duplicados),
             "convencion_signo": convencion, "sumas_convencion": sumas}
