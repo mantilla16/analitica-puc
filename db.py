@@ -484,6 +484,12 @@ def promover_balance(carga_id: str, cliente_id: str, filas: list[dict]) -> int:
     return len(filas)
 
 
+def filas_en_balance(carga_id: str) -> int:
+    """Cuántas filas de esta carga llegaron de verdad al análisis."""
+    return uno("SELECT count(*) AS n FROM core.balance WHERE carga_id=%s",
+               (carga_id,))["n"]
+
+
 def balance_de_carga(carga_id: str) -> list[dict]:
     return varios("SELECT * FROM core.balance WHERE carga_id=%s", (carga_id,))
 

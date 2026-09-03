@@ -60,13 +60,11 @@ export default function Encargo({ encargoId, onVolver }) {
   async function procesar(cargaId) {
     setOcupado(true);
     try {
+      // El servidor promueve el balance dentro de este mismo llamado. Antes
+      // se decidia aqui, y una interrupcion entre las dos peticiones dejaba
+      // el balance sin promover en silencio.
       const r = await api.procesar(cargaId);
-      let promo = null;
-      if (r.resultado !== "ARCHIVO_IDENTICO" && r.resultado !== "SIN_FILAS_NUEVAS") {
-        const c = await api.carga(cargaId);
-        if (c.tipo.startsWith("BAL")) promo = await api.promover(cargaId);
-      }
-      setResultado({ ...r, promocion: promo, carga_id: cargaId });
+      setResultado({ ...r, carga_id: cargaId });
       await refrescar();
     } catch (e) { setError(e.message); }
     finally { setOcupado(false); }
@@ -184,9 +182,21 @@ export default function Encargo({ encargoId, onVolver }) {
                   al análisis. Antes solo se notaba por ausencia: la tarjeta
                   no mostraba conteo de filas y nada más. */}
               {i.cargado && i.tipo.startsWith("BAL") && !i.filas_en_balance && (
-                <span title="El archivo se leyó pero sus filas no llegaron al balance: vuelva a subirlo">
-                  <Chip tono="rojo">sin promover</Chip>
-                </span>
+                <button
+                  onClick={async () => {
+                    setError(null); setOcupado(true);
+                    try {
+                      const promo = await api.promover(i.carga_id);
+                      setResultado({ resultado: "PROMOVIDA", promocion: promo,
+                                     carga_id: i.carga_id });
+                      await refrescar();
+                    } catch (e) { setError(e.message); }
+                    finally { setOcupado(false); }
+                  }}
+                  title="El archivo se leyó pero sus filas no llegaron al balance. Promoverlo las lleva, sin volver a subir el archivo."
+                  className="shrink-0">
+                  <Chip tono="rojo">sin promover · promover</Chip>
+                </button>
               )}
               {i.n_hallazgos > 0 && (
                 <button

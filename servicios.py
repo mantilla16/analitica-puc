@@ -125,7 +125,28 @@ def procesar(carga_id: str) -> dict:
     db.actualizar_carga(carga_id, filas_staging=n)
 
     resultado = cotejar(carga_id)
-    return {"filas_staging": n, **resultado}
+
+    # La promocion se hace AQUI, del lado del servidor, y no como una segunda
+    # llamada del navegador. Cuando la decidia el frontend, cualquier
+    # interrupcion entre las dos llamadas -- un error de red, un recargue, el
+    # auditor cambiando de pestaña -- dejaba el archivo leido en staging y
+    # `core.balance` vacio, sin que nada lo dijera: el papel se armaba
+    # comparando contra ceros. Un balance cargado se promueve siempre.
+    promocion = None
+    if nat == "BALANCE":
+        # Cuando el cotejo devuelve el insumo a la carga anterior, la que hay
+        # que asegurar promovida es ESA, no la que se acaba de subir.
+        destino = carga_id
+        if resultado["resultado"] in ("ARCHIVO_IDENTICO", "SIN_FILAS_NUEVAS"):
+            prev = db.carga_previa(c["cliente_id"], c["tipo"],
+                                   c["periodo_ini"], c["periodo_fin"], carga_id)
+            destino = str(prev["id"]) if prev else None
+            if destino and db.filas_en_balance(destino):
+                destino = None          # ya esta promovida: no se toca
+        if destino:
+            promocion = promover_balance(destino)
+
+    return {"filas_staging": n, "promocion": promocion, **resultado}
 
 
 def cotejar(carga_id: str) -> dict:
