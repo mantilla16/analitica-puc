@@ -384,6 +384,11 @@ def promover_balance(carga_id: str) -> dict:
             "saldo_naturaleza": sf * signo,
         })
 
+    # Un codigo repetido tumbaba el COPY completo por la llave unica de
+    # core.balance: la carga quedaba sin una sola fila y el auditor solo veia
+    # un 500. Se resuelve segun por que se repite, y siempre se deja dicho.
+    filas, duplicados = R.consolidar_duplicados(filas)
+
     n = db.promover_balance(carga_id, c["cliente_id"], filas)
     db.actualizar_carga(carga_id, convencion_signo=convencion)
 
@@ -394,6 +399,30 @@ def promover_balance(carga_id: str) -> dict:
     db.actualizar_carga(carga_id, filas_cargadas=n, estado=estado)
 
     TOPE = 50   # el detalle se acota para no inundar la tabla de hallazgos
+
+    for d in duplicados[:TOPE]:
+        if d["trato"] == "IDENTICA":
+            que = (f"El codigo aparece {d['veces']} veces con cifras identicas: "
+                   f"es la misma linea repetida en el archivo. Se conservo una "
+                   f"sola; sumarlas habria doblado la cuenta.")
+        else:
+            que = (f"El codigo aparece {d['veces']} veces con cifras distintas "
+                   f"(centros de costo, sucursales o terceros). Se sumaron en "
+                   f"un solo saldo de {d['saldo_final']}.")
+        db.crear_hallazgo(
+            encargo_id=c["encargo_id"], carga_id=carga_id,
+            tipo="CODIGO_REPETIDO", severidad="ADVERTENCIA",
+            codigo_puc=d["codigo_puc"], monto=d["saldo_final"],
+            descripcion=f"{d['nombre_cuenta'] or ''}. {que}".strip(),
+        )
+    if len(duplicados) > TOPE:
+        db.crear_hallazgo(
+            encargo_id=c["encargo_id"], carga_id=carga_id,
+            tipo="DETALLE_TRUNCADO", severidad="INFORMATIVO",
+            descripcion=(f"Hay {len(duplicados)} codigos repetidos; el detalle "
+                         f"solo lista los primeros {TOPE}."),
+        )
+
     for m in lineas[:TOPE]:
         db.crear_hallazgo(
             encargo_id=c["encargo_id"], carga_id=carga_id,
@@ -425,4 +454,5 @@ def promover_balance(carga_id: str) -> dict:
 
     return {"promovidas": n, "descartadas": descartadas,
             "cuadre": cuadre, "descuadres_linea": len(lineas),
+            "duplicados": len(duplicados),
             "convencion_signo": convencion, "sumas_convencion": sumas}

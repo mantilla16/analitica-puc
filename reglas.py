@@ -309,6 +309,75 @@ def validar_mapeo(mapeo: dict, campos: list[dict]) -> list[dict]:
     return problemas
 
 
+MONEY = ("saldo_inicial", "debito", "credito", "saldo_final")
+
+
+def consolidar_duplicados(filas: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Un codigo repetido en el mismo balance, resuelto segun por que se repite.
+
+    `core.balance` tiene UNIQUE (carga_id, codigo_puc), asi que un codigo
+    repetido tumbaba el COPY entero y la carga quedaba SIN una sola fila --
+    un 500 en la cara del auditor y cero balance. Callarse con
+    ON CONFLICT DO NOTHING seria peor: se perderia un saldo sin decirlo.
+
+    Hay dos causas y piden lo contrario:
+
+    - **Linea duplicada** del export (todas las cifras iguales): es la misma
+      fila impresa dos veces. Sumarla dobla la cuenta. Se conserva una.
+    - **Codigo repartido** (cifras distintas: centros de costo, sucursales,
+      terceros): el saldo de la cuenta es la suma. Se suma.
+
+    Adivinar no es peligroso porque hay como comprobarlo: `cuadre_por_nivel`
+    exige que cada nivel completo sume cero. Si se deduplica lo que habia
+    que sumar, o se suma lo que habia que deduplicar, el nivel se descuadra
+    y la carga se marca CON_HALLAZGOS. Cualquiera de los dos errores sale a
+    la luz en vez de quedar como una cifra silenciosa.
+
+    Devuelve las filas consolidadas -- en el orden de primera aparicion --
+    y la lista de lo que se hizo, para que quede como hallazgo.
+    """
+    orden: list[str] = []
+    grupos: dict[str, list[dict]] = {}
+    for f in filas:
+        cod = f["codigo_puc"]
+        if cod not in grupos:
+            grupos[cod] = []
+            orden.append(cod)
+        grupos[cod].append(f)
+
+    salida, duplicados = [], []
+    for cod in orden:
+        g = grupos[cod]
+        if len(g) == 1:
+            salida.append(g[0])
+            continue
+
+        huella = {tuple(Decimal(str(f.get(k) or 0)) for k in MONEY) for f in g}
+        base = dict(g[0])
+        if len(huella) == 1:
+            trato = "IDENTICA"
+        else:
+            trato = "SUMADA"
+            for k in MONEY:
+                base[k] = sum((Decimal(str(f.get(k) or 0)) for f in g), Decimal(0))
+            signo = base.get("signo") or 1
+            base["saldo_naturaleza"] = base["saldo_final"] * signo
+            # `saldo_natural` puede venir sin signo aplicado (convencion del
+            # archivo); se reconstruye con la misma proporcion que traia.
+            base["saldo_natural"] = (base["saldo_final"] if g[0].get("saldo_natural") ==
+                                     g[0].get("saldo_final")
+                                     else base["saldo_final"] * signo)
+
+        salida.append(base)
+        duplicados.append({
+            "codigo_puc": cod, "nombre_cuenta": base.get("nombre_cuenta"),
+            "veces": len(g), "trato": trato,
+            "saldo_final": base["saldo_final"],
+        })
+
+    return salida, duplicados
+
+
 def cuadre_por_nivel(filas: list[dict], niveles: dict[str, dict]) -> list[dict]:
     """Cada nivel completo debe sumar cero. Es la ecuación contable.
 

@@ -307,6 +307,55 @@ def validar_documentos() -> None:
 
 
 # =====================================================================
+# CODIGOS REPETIDOS
+# =====================================================================
+
+def validar_duplicados(base: list[dict]) -> None:
+    """Sembrando la repeticion se comprueba que se resuelve segun su causa.
+
+    Se siembra sobre el balance REAL para que el cuadre por nivel siga
+    siendo el juez: si la consolidacion estuviera mal, el nivel dejaria de
+    sumar cero y el caso 3 lo delataria.
+    """
+    def cifras(f):
+        return tuple(Decimal(str(f[k] or 0)) for k in
+                     ("saldo_inicial", "debito", "credito", "saldo_final"))
+
+    # --- linea identica repetida: se conserva una
+    origen = next(f for f in base if Decimal(str(f["saldo_final"] or 0)) != 0)
+    sembrado = base + [dict(origen)]
+    filas, dup = R.consolidar_duplicados(sembrado)
+    caso("codigo repetido · linea identica no se duplica",
+         len(base), len(filas))
+    caso("codigo repetido · linea identica se declara",
+         [(origen["codigo_puc"], "IDENTICA")],
+         [(d["codigo_puc"], d["trato"]) for d in dup])
+    caso("codigo repetido · linea identica conserva el saldo",
+         cifras(origen),
+         cifras(next(f for f in filas if f["codigo_puc"] == origen["codigo_puc"])))
+
+    # --- cifras distintas bajo el mismo codigo: se suman
+    partido = dict(origen)
+    for k in ("saldo_inicial", "debito", "credito", "saldo_final"):
+        partido[k] = Decimal(str(origen[k] or 0)) / 2
+    filas, dup = R.consolidar_duplicados(base + [partido])
+    consolidada = next(f for f in filas if f["codigo_puc"] == origen["codigo_puc"])
+    caso("codigo repetido · cifras distintas se suman",
+         "SUMADA", dup[0]["trato"] if dup else "sin declarar")
+    caso("codigo repetido · la suma es la de las partes",
+         tuple(v + v / 2 for v in cifras(origen)), cifras(consolidada))
+
+    # --- el nivel sigue siendo el juez
+    niveles = db.niveles_cargables()
+    antes = {q["nivel"]: q["estado"] for q in R.cuadre_por_nivel(base, niveles)}
+    filas, _ = R.consolidar_duplicados(base + [dict(origen)])
+    despues = {q["nivel"]: q["estado"] for q in R.cuadre_por_nivel(filas, niveles)}
+    caso("codigo repetido · deduplicar no altera el cuadre por nivel",
+         antes, despues,
+         "si cambia, la consolidacion movio un saldo que no debia mover")
+
+
+# =====================================================================
 
 def main() -> int:
     base = numerar(base_real())
@@ -321,6 +370,7 @@ def main() -> int:
     validar_huellas(base)
     validar_cotejo(base)
     validar_motivos()
+    validar_duplicados(base)
     validar_documentos()
 
     fallan = [r for r in resultados if not r[0]]
