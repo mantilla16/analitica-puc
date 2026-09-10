@@ -275,6 +275,11 @@ def _token() -> str:
         return str(r["access_token"])
 
 
+def _olvidar_token() -> None:
+    with _CANDADO:
+        _TOKEN.clear()
+
+
 def _enviar_por_graph(correo: str, texto: str, html: str) -> str:
     nombre_de, direccion_de = remitente()
     mensaje = {
@@ -288,8 +293,23 @@ def _enviar_por_graph(correo: str, texto: str, html: str) -> str:
         # la bitacora, que es donde un auditor la buscaria.
         "saveToSentItems": False,
     }
-    _pedir(f"{GRAPH}/users/{urllib.parse.quote(direccion_de)}/sendMail",
-           json.dumps(mensaje).encode("utf-8"),
-           {"Authorization": f"Bearer {_token()}",
-            "Content-Type": "application/json"})
+    cuerpo = json.dumps(mensaje).encode("utf-8")
+    url = f"{GRAPH}/users/{urllib.parse.quote(direccion_de)}/sendMail"
+
+    def _mandar() -> None:
+        _pedir(url, cuerpo, {"Authorization": f"Bearer {_token()}",
+                             "Content-Type": "application/json"})
+
+    try:
+        _mandar()
+    except RuntimeError as e:
+        # Un token vive hasta una hora en memoria. Si el permiso se concede
+        # DURANTE ese rato, el token cacheado sigue sin traerlo y todo
+        # seguiria fallando aunque en Azure ya este bien -- el peor caso
+        # para quien administra: arreglo lo que era y no cambio nada.
+        # Se tira el token y se reintenta una vez.
+        if "403" not in str(e):
+            raise
+        _olvidar_token()
+        _mandar()
     return f"GRAPH {direccion_de}"
