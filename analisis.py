@@ -61,6 +61,14 @@ def balance(encargo_id: str, tipo: str = "BAL_ACTUAL",
         SELECT b.codigo_puc, b.nombre_cuenta, b.nivel, b.digitos, b.clase,
                b.saldo_inicial, b.debito, b.credito, b.saldo_final,
                b.signo, b.saldo_natural,
+               -- Dos cifras distintas y la vista mostraba la equivocada bajo
+               -- el rotulo "Naturaleza": `saldo_natural` es la COMPARABLE (la
+               -- que suma cero) y `saldo_naturaleza` la que dice de que lado
+               -- esta el saldo frente a su naturaleza. Con la convencion del
+               -- catalogo coinciden; con la del archivo -- DOXA -- difieren en
+               -- signo, y pintaba en rojo como "al reves" todos los pasivos,
+               -- el patrimonio y los ingresos, que estaban normales.
+               coalesce(b.saldo_naturaleza, b.saldo_natural) AS saldo_naturaleza,
                k.nombre AS clase_nombre,
                EXISTS (
                  SELECT 1 FROM core.balance h
@@ -79,7 +87,9 @@ def balance(encargo_id: str, tipo: str = "BAL_ACTUAL",
         dif = (Decimal(str(f["saldo_inicial"])) + Decimal(str(f["debito"]))
                - Decimal(str(f["credito"])) - Decimal(str(f["saldo_final"])))
         f["descuadre_linea"] = dif.quantize(Decimal("0.01")) if dif != 0 else None
-    return {"carga_id": cid, "filas": filas, "total": len(filas)}
+    conv = db.uno("SELECT convencion_signo FROM core.carga WHERE id=%s", (cid,))
+    return {"carga_id": cid, "filas": filas, "total": len(filas),
+            "convencion_signo": (conv or {}).get("convencion_signo")}
 
 
 def resumen_clases(encargo_id: str, tipo: str = "BAL_ACTUAL") -> list[dict]:

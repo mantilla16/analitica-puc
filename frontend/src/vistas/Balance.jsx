@@ -27,6 +27,7 @@ export default function Balance({ encargoId }) {
   const [buscar, setBuscar] = useState("");
   const [detalle, setDetalle] = useState(null);
   const [error, setError] = useState(null);
+  const [convencion, setConvencion] = useState(null);
 
   useEffect(() => {
     api.resumen(encargoId, tipo).then(setResumen).catch((e) => setError(e.message));
@@ -39,7 +40,9 @@ export default function Balance({ encargoId }) {
     if (padre) p.set("padre", padre);
     else if (!buscar) p.set("nivel", "Clase");
     if (buscar) p.set("buscar", buscar);
-    api.balance(encargoId, p).then((r) => setFilas(r.filas)).catch((e) => setError(e.message));
+    api.balance(encargoId, p)
+      .then((r) => { setFilas(r.filas); setConvencion(r.convencion_signo); })
+      .catch((e) => setError(e.message));
   }, [encargoId, tipo, ruta, buscar]);
 
   function cambiarTipo(t) {
@@ -67,7 +70,7 @@ export default function Balance({ encargoId }) {
 
       {/* ------------------------------------------------ tarjetas clase */}
       <div>
-        <p className="rotulo mb-3">Por clase · saldo en naturaleza</p>
+        <p className="rotulo mb-3">Por clase · saldo comparable (las clases suman cero)</p>
         <div className="grid grid-cols-2 gap-px bg-regla sm:grid-cols-3 lg:grid-cols-6">
           {resumen.map((c) => (
             <button
@@ -163,9 +166,9 @@ export default function Balance({ encargoId }) {
                 <td className="cifra px-3 py-2 text-right text-xs">{monto(f.credito)}</td>
                 <td className="cifra px-3 py-2 text-right">{monto(f.saldo_final)}</td>
                 <td className={`cifra px-3 py-2 text-right ${
-                  Number(f.saldo_natural) < 0 ? "text-rojo" : ""
+                  Number(f.saldo_naturaleza) < 0 ? "text-rojo" : ""
                 }`}>
-                  {monto(f.saldo_natural)}
+                  {monto(f.saldo_naturaleza)}
                 </td>
                 <td className="px-3 py-2 text-center">
                   {f.descuadre_linea ? (
@@ -191,6 +194,15 @@ export default function Balance({ encargoId }) {
         revés — un banco sobregirado, un proveedor deudor.
         La columna <em>Cuadre</em> marca en rojo la fila donde saldo inicial
         + débito − crédito no da el saldo final reportado.
+        {convencion === "ARCHIVO" && (
+          <>
+            {" "}Este archivo ya trae pasivo, patrimonio e ingresos en
+            negativo (convención <span className="cifra">ARCHIVO</span>), así
+            que <em>Saldo final</em> y <em>Naturaleza</em> difieren en signo
+            para esas clases: la primera es la cifra tal como viene y suma
+            cero; la segunda dice de qué lado está el saldo.
+          </>
+        )}
       </p>
 
       {detalle && <DetalleCuenta d={detalle} onCerrar={() => setDetalle(null)} />}
