@@ -41,11 +41,28 @@ def main() -> int:
         print("El modo RELAY solo entrega a correos del propio dominio.")
         return 1
 
+    # Se comprueba la credencial ANTES de intentar el envío. Sin esto un
+    # fallo dice solo "no salió", y las dos causas tienen remedios
+    # distintos y a cargo de gente distinta: el secreto lo arregla quien
+    # administra Azure, el buzón remitente quien administra Exchange.
+    if CO.modo() == "GRAPH":
+        print("\ncomprobando la credencial…")
+        try:
+            CO._token()
+            print("credencial: OK — el tenant, la aplicación y el secreto sirven")
+        except Exception as e:
+            print(f"\nFALLO EN LA CREDENCIAL  {e}\n")
+            print(PISTAS["GRAPH"])
+            return 1
+
     print("\nenviando…")
     try:
         via = CO.enviar_codigo(destino, CODIGO_DE_PRUEBA, 10)
     except Exception as e:
-        print(f"\nFALLO  {type(e).__name__}: {e}\n")
+        print(f"\nFALLO AL ENVIAR  {type(e).__name__}: {e}\n")
+        if CO.modo() == "GRAPH":
+            print("La credencial sirve, así que el problema está en el buzón\n"
+                  "remitente o en los permisos sobre él, no en Azure.\n")
         print(PISTAS.get(CO.modo(), ""))
         return 1
 
