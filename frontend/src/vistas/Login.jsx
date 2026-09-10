@@ -154,6 +154,8 @@ export default function Login({ onEntrar }) {
               </Aviso>
             </div>
           )}
+          {/* CONSOLA es el unico modo que no envia nada. RELAY y SMTP si
+              envian, asi que no se avisa de ellos. */}
           {cfg?.modo_correo === "CONSOLA" && (
             <div className="mt-6">
               <Aviso tono="alerta" titulo="Modo consola">

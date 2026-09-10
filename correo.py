@@ -9,13 +9,24 @@ Configuración, por variables de entorno (en /etc/analitica-puc.env, que
 es root:root 600 -- la contraseña del buzón no puede quedar visible en
 `systemctl show` ni en el historial del shell):
 
-    AUDITORIA_CORREO_MODO      SMTP (por defecto) | CONSOLA
+    AUDITORIA_CORREO_MODO      SMTP (por defecto) | RELAY | CONSOLA
     AUDITORIA_SMTP_HOST        smtp.office365.com
     AUDITORIA_SMTP_PUERTO      587
     AUDITORIA_SMTP_USUARIO     buzón que autentica
     AUDITORIA_SMTP_CLAVE       su contraseña o contraseña de aplicación
     AUDITORIA_CORREO_DE        remitente que ve la gente
     AUDITORIA_CORREO_NOMBRE    nombre del remitente
+
+El modo RELAY entrega directo al servidor de la firma, sin usuario ni
+contraseña. Microsoft lo permite para destinatarios del propio dominio, y
+aquí TODOS lo son por definición: solo se envían códigos a @rbcol.co. Es la
+opción con menos fricción porque no hay credencial que guardar ni que rotar,
+y por lo tanto ninguna que se pueda filtrar. Necesita el puerto 25 de salida
+abierto y conviene que la IP del servidor esté en el SPF del dominio para que
+no caiga en correo no deseado.
+
+    AUDITORIA_SMTP_HOST        rbcol-co.mail.protection.outlook.com
+    AUDITORIA_SMTP_PUERTO      25
 
 El modo CONSOLA escribe el código en el log del servicio en vez de
 enviarlo, para poder probar el flujo antes de tener credenciales. NO es
@@ -55,13 +66,29 @@ def remitente() -> tuple[str, str]:
     return _cfg("AUDITORIA_CORREO_NOMBRE", "Analítica PUC"), de
 
 
+def destino_permitido(correo: str) -> bool:
+    """En RELAY solo se puede entregar dentro del propio dominio.
+
+    Se comprueba aquí y no se confía en que el llamador ya lo haya hecho:
+    `auth.problema_con_correo` ya exige el dominio, pero si mañana alguien
+    relaja esa regla, el envío empezaría a fallar en el servidor de
+    Microsoft en vez de decirlo aquí.
+    """
+    if modo() != "RELAY":
+        return True
+    import auth
+    return correo.lower().endswith("@" + auth.DOMINIO)
+
+
 def configurado() -> tuple[bool, str | None]:
     """(sirve, qué falta). El frontend lo usa para avisar en la pantalla
     de ingreso en vez de dejar a la gente pidiendo códigos que no salen."""
     if modo() == "CONSOLA":
         return True, None
-    faltan = [n for n in ("AUDITORIA_SMTP_HOST", "AUDITORIA_SMTP_USUARIO",
-                          "AUDITORIA_SMTP_CLAVE") if not _cfg(n)]
+    necesarias = ["AUDITORIA_SMTP_HOST"]
+    if modo() != "RELAY":                    # RELAY no autentica
+        necesarias += ["AUDITORIA_SMTP_USUARIO", "AUDITORIA_SMTP_CLAVE"]
+    faltan = [n for n in necesarias if not _cfg(n)]
     if faltan:
         return False, "Falta configurar " + ", ".join(faltan)
     if not remitente()[1]:
@@ -115,6 +142,9 @@ def enviar_codigo(correo: str, codigo: str, minutos: int) -> str:
     sirve, falta = configurado()
     if not sirve:
         raise CorreoNoConfigurado(falta or "Envío de correo sin configurar")
+    if not destino_permitido(correo):
+        raise CorreoNoConfigurado(
+            "En modo RELAY solo se entrega a correos del propio dominio")
 
     nombre_de, direccion_de = remitente()
     texto, html = _cuerpo(codigo, minutos)
@@ -129,14 +159,24 @@ def enviar_codigo(correo: str, codigo: str, minutos: int) -> str:
     msg.set_content(texto)
     msg.add_alternative(html, subtype="html")
 
+    relay = modo() == "RELAY"
     host = _cfg("AUDITORIA_SMTP_HOST")
-    puerto = int(_cfg("AUDITORIA_SMTP_PUERTO", "587") or 587)
-    with smtplib.SMTP(host, puerto, timeout=20) as s:
+    puerto = int(_cfg("AUDITORIA_SMTP_PUERTO", "25" if relay else "587") or 25)
+    with smtplib.SMTP(host, puerto, timeout=30) as s:
         s.ehlo()
-        # STARTTLS obligatorio: sin esto la contraseña del buzón viaja en
-        # claro. Si el servidor no lo ofrece, se prefiere no enviar.
-        s.starttls()
-        s.ehlo()
-        s.login(_cfg("AUDITORIA_SMTP_USUARIO"), _cfg("AUDITORIA_SMTP_CLAVE"))
+        if relay:
+            # Sin credencial que proteger, TLS es deseable pero no
+            # imprescindible: si el servidor no lo ofrece se entrega igual.
+            # Lo que viaja es un codigo de un solo uso hacia el propio
+            # dominio, no una contrasena.
+            if s.has_extn("starttls"):
+                s.starttls()
+                s.ehlo()
+        else:
+            # STARTTLS obligatorio: sin esto la contraseña del buzón viaja
+            # en claro. Si el servidor no lo ofrece, se prefiere no enviar.
+            s.starttls()
+            s.ehlo()
+            s.login(_cfg("AUDITORIA_SMTP_USUARIO"), _cfg("AUDITORIA_SMTP_CLAVE"))
         s.send_message(msg)
-    return f"SMTP {host}:{puerto}"
+    return f"{'RELAY' if relay else 'SMTP'} {host}:{puerto}"
