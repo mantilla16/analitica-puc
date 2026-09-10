@@ -9,13 +9,28 @@ Configuración, por variables de entorno (en /etc/analitica-puc.env, que
 es root:root 600 -- la contraseña del buzón no puede quedar visible en
 `systemctl show` ni en el historial del shell):
 
-    AUDITORIA_CORREO_MODO      SMTP (por defecto) | RELAY | CONSOLA
+    AUDITORIA_CORREO_MODO      GRAPH | SMTP (por defecto) | RELAY | CONSOLA
     AUDITORIA_SMTP_HOST        smtp.office365.com
     AUDITORIA_SMTP_PUERTO      587
     AUDITORIA_SMTP_USUARIO     buzón que autentica
     AUDITORIA_SMTP_CLAVE       su contraseña o contraseña de aplicación
     AUDITORIA_CORREO_DE        remitente que ve la gente
     AUDITORIA_CORREO_NOMBRE    nombre del remitente
+
+El modo GRAPH usa la API de Microsoft con un registro de aplicacion, que es
+la via soportada por Microsoft y no depende de la autenticacion basica de
+SMTP, que llevan anos retirando. No hay contrasena de ninguna persona: solo
+un secreto de aplicacion, que se rota sin afectar a nadie.
+
+    AUDITORIA_GRAPH_TENANT     id del directorio (Entra ID)
+    AUDITORIA_GRAPH_CLIENTE    id de la aplicacion
+    AUDITORIA_GRAPH_SECRETO    secreto de la aplicacion
+    AUDITORIA_CORREO_DE        buzon desde el que se envia
+
+ADVERTENCIA: el permiso Mail.Send de aplicacion deja enviar correo COMO
+CUALQUIER usuario del tenant. Hay que acotarlo con una politica de acceso de
+aplicacion en Exchange Online que lo limite al buzon remitente; sin ella, ese
+secreto vale para suplantar a cualquiera en la firma. Ver el README.
 
 El modo RELAY entrega directo al servidor de la firma, sin usuario ni
 contraseña. Microsoft lo permite para destinatarios del propio dominio, y
@@ -37,9 +52,15 @@ finge que se envió algo que no salió.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import smtplib
+import threading
+import urllib.error
+import urllib.parse
+import urllib.request
+from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 
 log = logging.getLogger("analitica.correo")
@@ -85,9 +106,13 @@ def configurado() -> tuple[bool, str | None]:
     de ingreso en vez de dejar a la gente pidiendo códigos que no salen."""
     if modo() == "CONSOLA":
         return True, None
-    necesarias = ["AUDITORIA_SMTP_HOST"]
-    if modo() != "RELAY":                    # RELAY no autentica
-        necesarias += ["AUDITORIA_SMTP_USUARIO", "AUDITORIA_SMTP_CLAVE"]
+    if modo() == "GRAPH":
+        necesarias = ["AUDITORIA_GRAPH_TENANT", "AUDITORIA_GRAPH_CLIENTE",
+                      "AUDITORIA_GRAPH_SECRETO", "AUDITORIA_CORREO_DE"]
+    else:
+        necesarias = ["AUDITORIA_SMTP_HOST"]
+        if modo() != "RELAY":                # RELAY no autentica
+            necesarias += ["AUDITORIA_SMTP_USUARIO", "AUDITORIA_SMTP_CLAVE"]
     faltan = [n for n in necesarias if not _cfg(n)]
     if faltan:
         return False, "Falta configurar " + ", ".join(faltan)
@@ -149,6 +174,9 @@ def enviar_codigo(correo: str, codigo: str, minutos: int) -> str:
     nombre_de, direccion_de = remitente()
     texto, html = _cuerpo(codigo, minutos)
 
+    if modo() == "GRAPH":
+        return _enviar_por_graph(correo, texto, html)
+
     msg = EmailMessage()
     msg["Subject"] = ASUNTO
     msg["From"] = f"{nombre_de} <{direccion_de}>"
@@ -180,3 +208,88 @@ def enviar_codigo(correo: str, codigo: str, minutos: int) -> str:
             s.login(_cfg("AUDITORIA_SMTP_USUARIO"), _cfg("AUDITORIA_SMTP_CLAVE"))
         s.send_message(msg)
     return f"{'RELAY' if relay else 'SMTP'} {host}:{puerto}"
+
+
+# =====================================================================
+# MICROSOFT GRAPH
+# =====================================================================
+
+_TOKEN: dict[str, object] = {}
+_CANDADO = threading.Lock()
+
+AUTORIDAD = "https://login.microsoftonline.com"
+GRAPH = "https://graph.microsoft.com/v1.0"
+
+
+def _pedir(url: str, datos: bytes | None, cabeceras: dict[str, str],
+           timeout: int = 20) -> dict:
+    req = urllib.request.Request(url, data=datos, headers=cabeceras,
+                                 method="POST" if datos is not None else "GET")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            cuerpo = r.read()
+            return json.loads(cuerpo) if cuerpo else {}
+    except urllib.error.HTTPError as e:
+        # El detalle de Microsoft es lo unico que dice si falta el permiso,
+        # si el secreto vencio o si el buzon no existe. Sin esto el auditor
+        # solo veria "502" y nadie sabria por donde empezar.
+        try:
+            d = json.loads(e.read() or b"{}")
+            msg = (d.get("error_description")
+                   or (d.get("error") or {}).get("message")
+                   or str(d))
+        except Exception:
+            msg = e.reason
+        raise RuntimeError(f"Graph respondio {e.code}: {str(msg)[:300]}") from None
+
+
+def _token() -> str:
+    """Token de aplicacion, reusado hasta poco antes de vencer.
+
+    Pedir uno por cada correo funcionaria, pero Microsoft limita la tasa de
+    peticiones al endpoint de tokens: con varias personas entrando a la vez
+    el limite se alcanza y los codigos dejan de salir. El candado evita que
+    dos hilos pidan token simultaneamente al expirar.
+    """
+    with _CANDADO:
+        vence = _TOKEN.get("vence")
+        if vence and datetime.now(timezone.utc) < vence:
+            return str(_TOKEN["valor"])
+
+        datos = urllib.parse.urlencode({
+            "client_id": _cfg("AUDITORIA_GRAPH_CLIENTE"),
+            "client_secret": _cfg("AUDITORIA_GRAPH_SECRETO"),
+            "scope": "https://graph.microsoft.com/.default",
+            "grant_type": "client_credentials",
+        }).encode()
+        r = _pedir(
+            f"{AUTORIDAD}/{_cfg('AUDITORIA_GRAPH_TENANT')}/oauth2/v2.0/token",
+            datos, {"Content-Type": "application/x-www-form-urlencoded"})
+        if "access_token" not in r:
+            raise RuntimeError("Graph no devolvio token")
+        # Un minuto de margen: un token que vence entre que se pide y se usa
+        # produciria un 401 esporadico, del tipo que nadie logra reproducir.
+        _TOKEN["valor"] = r["access_token"]
+        _TOKEN["vence"] = (datetime.now(timezone.utc)
+                           + timedelta(seconds=int(r.get("expires_in", 3600)) - 60))
+        return str(r["access_token"])
+
+
+def _enviar_por_graph(correo: str, texto: str, html: str) -> str:
+    nombre_de, direccion_de = remitente()
+    mensaje = {
+        "message": {
+            "subject": ASUNTO,
+            "body": {"contentType": "HTML", "content": html},
+            "toRecipients": [{"emailAddress": {"address": correo}}],
+        },
+        # Sin copia en Elementos enviados: son cientos de codigos al mes y
+        # solo llenarian el buzon de ruido. La constancia del envio queda en
+        # la bitacora, que es donde un auditor la buscaria.
+        "saveToSentItems": False,
+    }
+    _pedir(f"{GRAPH}/users/{urllib.parse.quote(direccion_de)}/sendMail",
+           json.dumps(mensaje).encode("utf-8"),
+           {"Authorization": f"Bearer {_token()}",
+            "Content-Type": "application/json"})
+    return f"GRAPH {direccion_de}"
