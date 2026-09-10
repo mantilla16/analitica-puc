@@ -27,3 +27,9 @@ frontend/files.zip
 .env
 .env.*
 !.env.example
+
+# Credencial viva: el refresh token con el que el servidor manda los
+# códigos de acceso. Quien lo tenga puede enviar correo como la persona
+# que autorizó, así que no va al repositorio ni siquiera siendo privado.
+correo_token.json
+correo_token.json.nuevo

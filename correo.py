@@ -9,13 +9,25 @@ Configuración, por variables de entorno (en /etc/analitica-puc.env, que
 es root:root 600 -- la contraseña del buzón no puede quedar visible en
 `systemctl show` ni en el historial del shell):
 
-    AUDITORIA_CORREO_MODO      GRAPH | SMTP (por defecto) | RELAY | CONSOLA
+    AUDITORIA_CORREO_MODO      GRAPH_USUARIO | GRAPH | SMTP | RELAY | CONSOLA
     AUDITORIA_SMTP_HOST        smtp.office365.com
     AUDITORIA_SMTP_PUERTO      587
     AUDITORIA_SMTP_USUARIO     buzón que autentica
     AUDITORIA_SMTP_CLAVE       su contraseña o contraseña de aplicación
     AUDITORIA_CORREO_DE        remitente que ve la gente
     AUDITORIA_CORREO_NOMBRE    nombre del remitente
+
+El modo GRAPH_USUARIO usa la API de Microsoft con permiso DELEGADO: envia
+como una persona concreta, la que autorizo una vez con
+`python autorizar_correo.py`. No necesita administrador global -- Mail.Send
+delegado lo consiente el propio usuario -- ni contrasena guardada: lo que
+queda en el servidor es un refresh token, que se puede revocar desde la
+cuenta sin cambiar nada mas.
+
+    AUDITORIA_GRAPH_TENANT     id del directorio (Entra ID)
+    AUDITORIA_GRAPH_CLIENTE    id de la aplicacion
+    AUDITORIA_CORREO_TOKEN     donde guardar el token (por defecto
+                               ./correo_token.json)
 
 El modo GRAPH usa la API de Microsoft con un registro de aplicacion, que es
 la via soportada por Microsoft y no depende de la autenticacion basica de
@@ -106,6 +118,15 @@ def configurado() -> tuple[bool, str | None]:
     de ingreso en vez de dejar a la gente pidiendo códigos que no salen."""
     if modo() == "CONSOLA":
         return True, None
+    if modo() == "GRAPH_USUARIO":
+        necesarias = ["AUDITORIA_GRAPH_TENANT", "AUDITORIA_GRAPH_CLIENTE"]
+        faltan = [n for n in necesarias if not _cfg(n)]
+        if faltan:
+            return False, "Falta configurar " + ", ".join(faltan)
+        if not _leer_refresh():
+            return False, ("Nadie ha autorizado el envio todavia. En el "
+                           "servidor: python autorizar_correo.py")
+        return True, None
     if modo() == "GRAPH":
         necesarias = ["AUDITORIA_GRAPH_TENANT", "AUDITORIA_GRAPH_CLIENTE",
                       "AUDITORIA_GRAPH_SECRETO", "AUDITORIA_CORREO_DE"]
@@ -174,7 +195,7 @@ def enviar_codigo(correo: str, codigo: str, minutos: int) -> str:
     nombre_de, direccion_de = remitente()
     texto, html = _cuerpo(codigo, minutos)
 
-    if modo() == "GRAPH":
+    if modo() in ("GRAPH", "GRAPH_USUARIO"):
         return _enviar_por_graph(correo, texto, html)
 
     msg = EmailMessage()
@@ -244,7 +265,7 @@ def _pedir(url: str, datos: bytes | None, cabeceras: dict[str, str],
 
 
 def _token() -> str:
-    """Token de aplicacion, reusado hasta poco antes de vencer.
+    """Token de acceso, reusado hasta poco antes de vencer.
 
     Pedir uno por cada correo funcionaria, pero Microsoft limita la tasa de
     peticiones al endpoint de tokens: con varias personas entrando a la vez
@@ -256,17 +277,37 @@ def _token() -> str:
         if vence and datetime.now(timezone.utc) < vence:
             return str(_TOKEN["valor"])
 
-        datos = urllib.parse.urlencode({
-            "client_id": _cfg("AUDITORIA_GRAPH_CLIENTE"),
-            "client_secret": _cfg("AUDITORIA_GRAPH_SECRETO"),
-            "scope": "https://graph.microsoft.com/.default",
-            "grant_type": "client_credentials",
-        }).encode()
+        if modo() == "GRAPH_USUARIO":
+            refresh = _leer_refresh()
+            if not refresh:
+                raise RuntimeError(
+                    "No hay autorizacion guardada. En el servidor: "
+                    "python autorizar_correo.py")
+            campos = {
+                "client_id": _cfg("AUDITORIA_GRAPH_CLIENTE"),
+                "scope": ALCANCE,
+                "grant_type": "refresh_token",
+                "refresh_token": refresh,
+            }
+        else:
+            campos = {
+                "client_id": _cfg("AUDITORIA_GRAPH_CLIENTE"),
+                "client_secret": _cfg("AUDITORIA_GRAPH_SECRETO"),
+                "scope": "https://graph.microsoft.com/.default",
+                "grant_type": "client_credentials",
+            }
         r = _pedir(
             f"{AUTORIDAD}/{_cfg('AUDITORIA_GRAPH_TENANT')}/oauth2/v2.0/token",
-            datos, {"Content-Type": "application/x-www-form-urlencoded"})
+            urllib.parse.urlencode(campos).encode(),
+            {"Content-Type": "application/x-www-form-urlencoded"})
         if "access_token" not in r:
             raise RuntimeError("Graph no devolvio token")
+        # Microsoft rota el refresh token en cada uso. Guardar el nuevo no
+        # es opcional: si se conserva el viejo, el dia que Microsoft
+        # invalide el anterior nadie podria entrar y no habria pista de por
+        # que -- funcionaba hasta que dejo de funcionar.
+        if r.get("refresh_token"):
+            guardar_refresh(r["refresh_token"])
         # Un minuto de margen: un token que vence entre que se pide y se usa
         # produciria un 401 esporadico, del tipo que nadie logra reproducir.
         _TOKEN["valor"] = r["access_token"]
@@ -294,7 +335,11 @@ def _enviar_por_graph(correo: str, texto: str, html: str) -> str:
         "saveToSentItems": False,
     }
     cuerpo = json.dumps(mensaje).encode("utf-8")
-    url = f"{GRAPH}/users/{urllib.parse.quote(direccion_de)}/sendMail"
+    # Con permiso delegado se envia como quien autorizo, y ese es el unico
+    # buzon al que se tiene acceso: /me. Pedir /users/{alguien} daria 403
+    # aunque ese alguien sea la misma persona.
+    url = (f"{GRAPH}/me/sendMail" if modo() == "GRAPH_USUARIO"
+           else f"{GRAPH}/users/{urllib.parse.quote(direccion_de)}/sendMail")
 
     def _mandar() -> None:
         _pedir(url, cuerpo, {"Authorization": f"Bearer {_token()}",
@@ -313,3 +358,77 @@ def _enviar_por_graph(correo: str, texto: str, html: str) -> str:
         _olvidar_token()
         _mandar()
     return f"GRAPH {direccion_de}"
+
+
+# =====================================================================
+# AUTORIZACION DELEGADA (flujo de codigo de dispositivo)
+# =====================================================================
+
+# `offline_access` es lo que hace que Microsoft entregue un refresh token;
+# sin el habria que volver a iniciar sesion cada hora, que es justo lo que
+# un servidor no puede hacer.
+ALCANCE = "offline_access https://graph.microsoft.com/Mail.Send"
+
+
+def ruta_token() -> str:
+    return _cfg("AUDITORIA_CORREO_TOKEN", "correo_token.json")
+
+
+def _leer_refresh() -> str | None:
+    try:
+        with open(ruta_token(), encoding="utf-8") as f:
+            return json.load(f).get("refresh_token") or None
+    except (OSError, ValueError):
+        return None
+
+
+def guardar_refresh(token: str) -> None:
+    """Guarda el refresh token con permisos restringidos.
+
+    Se escribe en un temporal y se renombra: un reemplazo a medias dejaria
+    el archivo truncado y nadie podria entrar a la aplicacion hasta volver
+    a autorizar. El renombrado es atomico.
+    """
+    ruta = ruta_token()
+    tmp = ruta + ".nuevo"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({"refresh_token": token,
+                   "guardado": datetime.now(timezone.utc).isoformat()}, f)
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, ruta)
+
+
+def iniciar_dispositivo() -> dict:
+    """Pide el codigo que la persona escribe en microsoft.com/devicelogin."""
+    datos = urllib.parse.urlencode({
+        "client_id": _cfg("AUDITORIA_GRAPH_CLIENTE"),
+        "scope": ALCANCE,
+    }).encode()
+    return _pedir(
+        f"{AUTORIDAD}/{_cfg('AUDITORIA_GRAPH_TENANT')}/oauth2/v2.0/devicecode",
+        datos, {"Content-Type": "application/x-www-form-urlencoded"})
+
+
+def consultar_dispositivo(device_code: str) -> tuple[str, dict]:
+    """(estado, datos) mientras se espera a que la persona apruebe.
+
+    Los "errores" authorization_pending y slow_down no son errores: son la
+    forma en que Microsoft dice "todavia no" y "pregunte mas despacio".
+    Tratarlos como fallos abortaria la autorizacion apenas empezada.
+    """
+    datos = urllib.parse.urlencode({
+        "client_id": _cfg("AUDITORIA_GRAPH_CLIENTE"),
+        "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+        "device_code": device_code,
+    }).encode()
+    url = f"{AUTORIDAD}/{_cfg('AUDITORIA_GRAPH_TENANT')}/oauth2/v2.0/token"
+    try:
+        r = _pedir(url, datos, {"Content-Type": "application/x-www-form-urlencoded"})
+        return "listo", r
+    except RuntimeError as e:
+        texto = str(e)
+        if "authorization_pending" in texto:
+            return "pendiente", {}
+        if "slow_down" in texto:
+            return "lento", {}
+        return "rechazado", {"error": "", "error_description": texto}

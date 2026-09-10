@@ -36,7 +36,11 @@ def _permisos(token: str) -> list[str]:
         carga = token.split(".")[1]
         carga += "=" * (-len(carga) % 4)          # base64url sin relleno
         datos = json.loads(base64.urlsafe_b64decode(carga))
-        return list(datos.get("roles") or [])
+        # Un token de APLICACIÓN lleva sus permisos en `roles`; uno
+        # DELEGADO los lleva en `scp`, separados por espacios. Mirar solo
+        # uno de los dos diría "sin permisos" sobre un token que sí los tiene.
+        return (list(datos.get("roles") or [])
+                + str(datos.get("scp") or "").split())
     except Exception:
         return []
 
@@ -64,7 +68,7 @@ def main() -> int:
     # fallo dice solo "no salió", y las dos causas tienen remedios
     # distintos y a cargo de gente distinta: el secreto lo arregla quien
     # administra Azure, el buzón remitente quien administra Exchange.
-    if CO.modo() == "GRAPH":
+    if CO.modo() in ("GRAPH", "GRAPH_USUARIO"):
         print("\ncomprobando la credencial…")
         try:
             token = CO._token()
@@ -102,7 +106,7 @@ def main() -> int:
         via = CO.enviar_codigo(destino, CODIGO_DE_PRUEBA, 10)
     except Exception as e:
         print(f"\nFALLO AL ENVIAR  {type(e).__name__}: {e}\n")
-        if CO.modo() == "GRAPH":
+        if CO.modo() in ("GRAPH", "GRAPH_USUARIO"):
             print("La credencial sirve, así que el problema está en el buzón\n"
                   "remitente o en los permisos sobre él, no en Azure.\n")
         print(PISTAS.get(CO.modo(), ""))
