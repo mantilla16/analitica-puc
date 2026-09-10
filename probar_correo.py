@@ -14,12 +14,31 @@ para entrar.
 """
 from __future__ import annotations
 
+import base64
+import json
 import os
 import sys
 
 import correo as CO
 
 CODIGO_DE_PRUEBA = "000000"
+
+
+def _permisos(token: str) -> list[str]:
+    """Los permisos de aplicación que trae el token, del claim `roles`.
+
+    Se decodifica sin verificar la firma a propósito: no se está confiando
+    en el token para autorizar nada, se le está preguntando qué dice de sí
+    mismo para poder diagnosticar. La firma la verifica Microsoft cuando lo
+    recibe.
+    """
+    try:
+        carga = token.split(".")[1]
+        carga += "=" * (-len(carga) % 4)          # base64url sin relleno
+        datos = json.loads(base64.urlsafe_b64decode(carga))
+        return list(datos.get("roles") or [])
+    except Exception:
+        return []
 
 
 def main() -> int:
@@ -48,11 +67,34 @@ def main() -> int:
     if CO.modo() == "GRAPH":
         print("\ncomprobando la credencial…")
         try:
-            CO._token()
+            token = CO._token()
             print("credencial: OK — el tenant, la aplicación y el secreto sirven")
         except Exception as e:
             print(f"\nFALLO EN LA CREDENCIAL  {e}\n")
             print(PISTAS["GRAPH"])
+            return 1
+
+        # El propio token dice qué permisos le concedieron. Preguntárselo a
+        # él evita el peor diagnóstico posible: "403, revise el permiso o el
+        # buzón o la política", que deja al administrador tanteando tres
+        # cosas a la vez. Si Mail.Send no está en el token, el permiso no
+        # está consentido y no hay nada que revisar del buzón.
+        roles = _permisos(token)
+        print(f"permisos  : {', '.join(roles) if roles else '(ninguno)'}")
+        if "Mail.Send" not in roles:
+            print("\nFALTA EL PERMISO Mail.Send EN EL TOKEN.\n")
+            print("El secreto y la aplicación están bien, pero nadie le ha\n"
+                  "concedido el permiso, o se agregó como Delegado en vez de\n"
+                  "Aplicación. En el portal:\n\n"
+                  "  Entra ID -> Registros de aplicaciones -> su app\n"
+                  "  -> Permisos de API\n\n"
+                  "La fila de Mail.Send tiene que decir Tipo = Aplicación\n"
+                  "y Estado = Concedido, con visto verde. Si dice Delegado,\n"
+                  "bórrela y agréguela de nuevo eligiendo 'Permisos de\n"
+                  "aplicación'. Si el Estado no está concedido, pulse\n"
+                  "'Conceder consentimiento del administrador'.\n\n"
+                  "Si ese botón está en gris, su cuenta no puede consentir en\n"
+                  "nombre del tenant y hace falta un Administrador global.")
             return 1
 
     print("\nenviando…")
