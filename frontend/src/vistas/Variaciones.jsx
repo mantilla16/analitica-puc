@@ -437,6 +437,28 @@ export default function Variaciones({ encargoId }) {
                 {obs[f.cuenta] && (
                   <tr className="border-b border-regla-fina bg-papel-hondo">
                     <td colSpan={8} className="px-3 py-3">
+                      {/* Una observacion escrita sobre otras cifras puede
+                          afirmar lo contrario de lo que paso. Se avisa antes
+                          del texto, no despues. */}
+                      {obs[f.cuenta].desactualizada && (
+                        <p className="mb-2 border-l-2 border-rojo bg-papel-alto px-3 py-2
+                                      text-xs leading-relaxed text-rojo">
+                          Esta observación se redactó con otras cifras y puede
+                          decir lo contrario de lo que ocurrió. Vuelva a
+                          generarla.
+                          {obs[f.cuenta].cambiaron?.length > 0 && (
+                            <span className="mt-1 block text-tinta-media">
+                              {obs[f.cuenta].cambiaron.map((c) => (
+                                <span key={c.cifra} className="mr-3">
+                                  <span className="cifra">{c.cifra}</span>:{" "}
+                                  {String(c.antes)} → {String(c.ahora)}
+                                </span>
+                              ))}
+                            </span>
+                          )}
+                        </p>
+                      )}
+
                       <div className="flex items-baseline gap-2">
                         <span className={obs[f.cuenta].verificado ? "rotulo text-verde" : "rotulo text-ambar"}>
                           {obs[f.cuenta].verificado ? "IA · cifras verificadas" : "IA · revisar cifra sin verificar"}

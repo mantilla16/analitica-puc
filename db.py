@@ -896,7 +896,10 @@ def observaciones_ia_vigentes(encargo_id: str, fase: str) -> list[dict]:
     return varios(
         """SELECT DISTINCT ON (codigo_puc)
                   codigo_puc, version, texto, verificado, cifras_no_verificadas,
-                  instruccion_auditor, modelo, creado_por, creado_en
+                  instruccion_auditor, modelo, creado_por, creado_en,
+                  -- La entrada con que se redactó: es lo que permite saber
+                  -- si el texto sigue hablando de las cifras de hoy.
+                  entrada
            FROM core.observacion_ia
            WHERE encargo_id=%s AND fase=%s
            ORDER BY codigo_puc, version DESC""",

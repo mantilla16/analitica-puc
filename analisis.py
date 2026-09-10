@@ -196,18 +196,30 @@ def variaciones(encargo_id: str, fase: str | None = None) -> dict:
         if cod not in act and cod not in comparativo:
             continue
 
-        sa = Decimal(act[cod]["saldo_natural"]) if cod in act else Decimal(0)
-        sc = Decimal(comparativo[cod]["saldo_natural"]) if cod in comparativo else Decimal(0)
+        # La variación se calcula sobre `saldo_naturaleza` -- el saldo con el
+        # signo de su propia naturaleza -- y NO sobre la cifra comparable.
+        #
+        # La comparable sirve para probar que el balance cuadra (suma cero),
+        # pero su signo depende de cómo venga el archivo del cliente: con la
+        # convención del catálogo un pasivo sale positivo y con la del
+        # archivo sale negativo. Usarla aquí hacía que el MISMO hecho
+        # económico saliera con signo opuesto según el ERP que exportó el
+        # archivo: 2505 SALARIOS POR PAGAR bajando de 140 a 8 millones se
+        # leía como "aumento del 94%" en DOXA y como "disminución del 94%" en
+        # LIQUITECH. Con `saldo_naturaleza`, positivo siempre significa "la
+        # cuenta se comporta como debe", así que subir es subir en cualquier
+        # cliente: la obligación por salarios DISMINUYÓ 94%.
+        #
+        # No altera el alcance: `motivo_seleccion` mide magnitudes
+        # (`abs(var)`, `abs(pctv)`) y compara contra cero, todo insensible al
+        # signo. Lo único que cambia es la DIRECCIÓN que se reporta, que es
+        # justo lo que estaba al revés.
+        sa = Decimal(act[cod]["saldo_naturaleza"]) if cod in act else Decimal(0)
+        sc = Decimal(comparativo[cod]["saldo_naturaleza"]) if cod in comparativo else Decimal(0)
         var = (sa - sc).quantize(Decimal("0.01"))
         pctv = ((sa - sc) / abs(sc) * 100).quantize(Decimal("0.01")) if sc else None
 
-        # La naturaleza se juzga con `saldo_naturaleza`, no con la cifra
-        # comparable: en un archivo que ya trae los signos aplicados, todo
-        # pasivo tiene saldo comparable negativo y marcarlo como naturaleza
-        # invertida sería señalar como excepción lo normal.
-        nat = (Decimal(act[cod]["saldo_naturaleza"]) if cod in act
-               else Decimal(comparativo[cod]["saldo_naturaleza"])
-               if cod in comparativo else Decimal(0))
+        nat = sa if cod in act else sc
         motivo = R.motivo_seleccion(sa, sc, var, pctv,
                                     umbral if aplica else None,
                                     trivial, pct_var, usa_var, naturaleza=nat)
@@ -379,7 +391,10 @@ def _auxiliares_variacion(act_id: str, comparativo_id: str, codigo: str,
             # El nivel más granular de ESTE archivo, no el nombre 'Auxiliar':
             # unos ERP bajan a 8 dígitos y otros a 9, y con el nombre fijo el
             # desglose salía vacío para los segundos sin decir por qué.
-            """SELECT codigo_puc, nombre_cuenta, saldo_natural
+            # Misma base que la cuenta: el porcentaje es var/variacion_cuenta,
+            # y con bases de signo distinto el cociente saldria invertido.
+            """SELECT codigo_puc, nombre_cuenta,
+                      coalesce(saldo_naturaleza, saldo_natural) AS saldo_natural
                FROM core.balance
                WHERE carga_id=%s AND left(codigo_puc,%s)=%s
                  AND digitos = (SELECT max(digitos) FROM core.balance
@@ -410,6 +425,16 @@ def _auxiliares_variacion(act_id: str, comparativo_id: str, codigo: str,
     ]
 
 
+def _direccion(var: Decimal) -> str:
+    """Aumentó o disminuyó, sobre el saldo en su propia naturaleza."""
+    v = Decimal(str(var or 0))
+    if v > 0:
+        return "aumento (la cuenta creció respecto a su comparativo)"
+    if v < 0:
+        return "disminucion (la cuenta se redujo respecto a su comparativo)"
+    return "sin cambio"
+
+
 def _entrada_observacion(fila: dict, patrones: list[dict],
                          auxiliares: list[dict]) -> dict:
     """Solo lo ya calculado: nada que el modelo tenga que inferir con
@@ -424,6 +449,11 @@ def _entrada_observacion(fila: dict, patrones: list[dict],
         "saldo_comparativo": _cop(fila["saldo_comparativo"]),
         "variacion": _cop(fila["variacion"]),
         "variacion_pct": fila["variacion_pct"],
+        # La dirección se calcula aquí y se dice en palabras. Dejar que el
+        # modelo la deduzca del signo es pedirle una operación aritmetica
+        # sobre una convención contable, y es donde se equivocaba: llamaba
+        # "aumento" a un pasivo que se pagó.
+        "direccion": _direccion(fila["variacion"]),
         "motivo_seleccion": fila["motivo"],
         "patrones_de_movimiento": [
             {"descripcion": p["descripcion"], "veces": p["veces"], "neto": _cop(p["neto"])}
@@ -596,9 +626,40 @@ def _cuadre_movimientos(fila: dict, totales: dict | None, signo: int) -> dict | 
     }
 
 
+CIFRAS_DE_LA_OBSERVACION = ("saldo_actual", "saldo_comparativo", "variacion",
+                            "variacion_pct")
+
+
 def observaciones_guardadas(encargo_id: str, fase: str) -> list[dict]:
-    """Lo ya redactado para esta fase, sin volver a llamar al modelo."""
-    return db.observaciones_ia_vigentes(encargo_id, fase)
+    """Lo ya redactado para esta fase, sin volver a llamar al modelo.
+
+    Cada observación se coteja contra las cifras de HOY. Un texto redactado
+    sobre otras cifras no es solo viejo: puede afirmar lo contrario de lo
+    que pasó. Al corregir la base de la variación, todas las observaciones
+    de un cliente cuyo archivo viene con los signos aplicados quedaron
+    diciendo "aumento" sobre cuentas que disminuyeron. Callarlo dejaría un
+    papel firmado con una explicación al revés.
+    """
+    guardadas = db.observaciones_ia_vigentes(encargo_id, fase)
+    if not guardadas:
+        return []
+
+    d = variaciones(encargo_id, fase)
+    hoy = {f["cuenta"]: f for f in d.get("filas", [])}
+
+    for o in guardadas:
+        entrada = o.pop("entrada", None) or {}
+        fila = hoy.get(o["codigo_puc"])
+        cambiadas = []
+        if fila:
+            actual = _entrada_observacion(fila, [], [])
+            for k in CIFRAS_DE_LA_OBSERVACION:
+                antes, ahora = entrada.get(k), actual.get(k)
+                if antes is not None and str(antes) != str(ahora):
+                    cambiadas.append({"cifra": k, "antes": antes, "ahora": ahora})
+        o["desactualizada"] = bool(cambiadas)
+        o["cambiaron"] = cambiadas
+    return guardadas
 
 
 def historia_observaciones(encargo_id: str, codigo: str | None = None) -> list[dict]:

@@ -307,6 +307,44 @@ def validar_documentos() -> None:
 
 
 # =====================================================================
+# DIRECCION DE LA VARIACION
+# =====================================================================
+
+def validar_direccion() -> None:
+    """El mismo hecho economico debe leerse igual en cualquier cliente.
+
+    Un pasivo que se paga -- 2505 SALARIOS POR PAGAR, de 140 a 8 millones --
+    tiene que salir como DISMINUCION venga el archivo con la convencion del
+    catalogo o con la del archivo. Sobre la cifra comparable no era asi: el
+    signo dependia del ERP que exporto el archivo.
+    """
+    cat_ant, cat_act = D("140041409"), D("8069380")        # CATALOGO: pasivo +
+    arc_ant, arc_act = D("-140041409"), D("-8069380")      # ARCHIVO:  pasivo -
+    signo = -1
+
+    # saldo_naturaleza = saldo_final * signo, en las dos convenciones
+    nat_cat = ((cat_ant * 1), (cat_act * 1))               # ya viene en naturaleza
+    nat_arc = ((arc_ant * signo), (arc_act * signo))
+    caso("direccion · las dos convenciones dan la misma cifra en naturaleza",
+         nat_cat, nat_arc)
+
+    var = (nat_arc[1] - nat_arc[0]).quantize(CENT)
+    caso("direccion · pagar un pasivo es una disminucion",
+         True, var < 0, f"variacion en naturaleza: {var}")
+
+    # y el alcance no se mueve: motivo_seleccion mide magnitudes
+    umbral, trivial, pct = D("50000000"), D("1000000"), D("20")
+    sobre_comparable = R.motivo_seleccion(
+        arc_act, arc_ant, (arc_act - arc_ant), D("94.24"),
+        umbral, trivial, pct, True, naturaleza=nat_arc[1])
+    sobre_naturaleza = R.motivo_seleccion(
+        nat_arc[1], nat_arc[0], var, D("-94.24"),
+        umbral, trivial, pct, True, naturaleza=nat_arc[1])
+    caso("direccion · cambiar la base no cambia el motivo",
+         sobre_comparable, sobre_naturaleza)
+
+
+# =====================================================================
 # CODIGOS REPETIDOS
 # =====================================================================
 
@@ -370,6 +408,7 @@ def main() -> int:
     validar_huellas(base)
     validar_cotejo(base)
     validar_motivos()
+    validar_direccion()
     validar_duplicados(base)
     validar_documentos()
 
