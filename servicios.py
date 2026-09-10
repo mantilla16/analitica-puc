@@ -20,7 +20,8 @@ import reglas as R
 
 def abrir_encargo(nit: str, razon_social: str, fecha_corte: date,
                   responsable: str | None = None,
-                  seudonimo: str | None = None) -> dict:
+                  seudonimo: str | None = None,
+                  creado_por: str | None = None) -> dict:
     """Crea cliente y encargo, y siembra las tres materialidades vacías.
 
     Los valores los digita el auditor después: hay una materialidad por
@@ -37,7 +38,7 @@ def abrir_encargo(nit: str, razon_social: str, fecha_corte: date,
     if enc is None:
         cierre_ant, corte_ant = R.derivar_fechas_encargo(fecha_corte)
         enc = db.crear_encargo(cli["id"], fecha_corte, cierre_ant,
-                               corte_ant, responsable)
+                               corte_ant, responsable, creado_por)
 
     db.sembrar_materialidades(enc["id"])
 

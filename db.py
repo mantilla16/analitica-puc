@@ -122,13 +122,15 @@ def encargo_por_corte(cliente_id: str, fecha_corte: date) -> dict | None:
 
 
 def crear_encargo(cliente_id: str, fecha_corte: date, cierre_ant: date,
-                  corte_ant: date, responsable: str | None) -> dict:
+                  corte_ant: date, responsable: str | None,
+                  creado_por: str | None = None) -> dict:
     return uno(
         """INSERT INTO core.encargo
              (cliente_id, fecha_corte, fecha_cierre_anterior,
-              fecha_corte_anterior, responsable)
-           VALUES (%s,%s,%s,%s,%s) RETURNING *""",
-        (cliente_id, fecha_corte, cierre_ant, corte_ant, responsable),
+              fecha_corte_anterior, responsable, creado_por)
+           VALUES (%s,%s,%s,%s,%s,%s) RETURNING *""",
+        (cliente_id, fecha_corte, cierre_ant, corte_ant, responsable,
+         creado_por),
     )
 
 
@@ -224,12 +226,48 @@ def encargo(encargo_id: str) -> dict | None:
     )
 
 
-def encargos() -> list[dict]:
+def encargos(usuario_id: str | None = None, todos: bool = False) -> list[dict]:
+    """Los encargos que esta persona puede ver.
+
+    El filtro se hace AQUI, en la consulta, y no escondiendo tarjetas en
+    el frontend: no mostrar algo no es lo mismo que no darlo. Un ADMIN
+    (`todos=True`) los ve completos porque en revisoria fiscal alguien
+    tiene que poder revisar y firmar el trabajo del equipo.
+
+    Un encargo sin dueño lo ve solo un ADMIN. Ocultarselo a todo el mundo
+    por no saber de quien es equivaldria a perderlo.
+    """
+    if todos:
+        return varios(
+            """SELECT e.*, cl.razon_social, cl.nit, u.nombre AS creado_por_nombre
+               FROM core.encargo e
+               JOIN core.cliente cl ON cl.id=e.cliente_id
+               LEFT JOIN core.usuario u ON u.id=e.creado_por
+               ORDER BY e.fecha_corte DESC"""
+        )
     return varios(
-        """SELECT e.*, cl.razon_social, cl.nit
-           FROM core.encargo e JOIN core.cliente cl ON cl.id=e.cliente_id
-           ORDER BY e.fecha_corte DESC"""
+        """SELECT e.*, cl.razon_social, cl.nit, u.nombre AS creado_por_nombre
+           FROM core.encargo e
+           JOIN core.cliente cl ON cl.id=e.cliente_id
+           LEFT JOIN core.usuario u ON u.id=e.creado_por
+           WHERE e.creado_por = %s
+           ORDER BY e.fecha_corte DESC""",
+        (usuario_id,),
     )
+
+
+def dueno_de_encargo(encargo_id: str) -> str | None:
+    """El id del usuario que creó el encargo, o None si no tiene dueño."""
+    f = uno("SELECT creado_por FROM core.encargo WHERE id=%s", (encargo_id,))
+    return str(f["creado_por"]) if f and f["creado_por"] else None
+
+
+def encargo_de_carga(carga_id: str) -> str | None:
+    """A qué encargo pertenece una carga. Lo usa la puerta de acceso: hay
+    rutas que solo llevan el id de la carga, y sin esto quedarían fuera
+    del control por el simple hecho de no nombrar el encargo."""
+    f = uno("SELECT encargo_id FROM core.carga WHERE id=%s", (carga_id,))
+    return str(f["encargo_id"]) if f and f["encargo_id"] else None
 
 
 def eliminar_encargo(encargo_id: str) -> None:
@@ -720,6 +758,13 @@ def usuario_por_nombre(usuario: str) -> dict | None:
     return uno("SELECT * FROM core.usuario WHERE usuario=%s", (usuario,))
 
 
+def usuario_por_correo(correo: str) -> dict | None:
+    """En minúsculas a los dos lados: el correo es la identidad y no
+    distingue mayúsculas."""
+    return uno("SELECT * FROM core.usuario WHERE lower(correo)=lower(%s)",
+               (correo,))
+
+
 def usuario_por_id(usuario_id: str) -> dict | None:
     return uno("SELECT * FROM core.usuario WHERE id=%s", (usuario_id,))
 
@@ -935,4 +980,78 @@ def historia_observaciones_ia(cliente_id: str, codigo_puc: str | None = None,
             ORDER BY o.creado_en DESC
             LIMIT {int(limite)}""",
         tuple(args),
+    )
+
+
+# =====================================================================
+# CÓDIGOS DE ACCESO
+# =====================================================================
+
+def codigos_recientes(correo: str, desde: datetime) -> int:
+    """Cuántos códigos se han pedido para este correo desde `desde`. Es el
+    freno contra usar el sistema para inundar el buzón de alguien."""
+    return uno(
+        """SELECT count(*) AS n FROM core.codigo_acceso
+            WHERE lower(correo)=lower(%s) AND creado_en >= %s""",
+        (correo, desde),
+    )["n"]
+
+
+def crear_codigo(correo: str, codigo_hash: str, expira_en: datetime,
+                 ip: str | None, agente: str | None) -> dict:
+    return uno(
+        """INSERT INTO core.codigo_acceso
+             (correo, codigo_hash, expira_en, ip, agente)
+           VALUES (%s,%s,%s,%s,%s) RETURNING id, creado_en, expira_en""",
+        (correo, codigo_hash, expira_en, ip, agente),
+    )
+
+
+def codigo_vigente(correo: str) -> dict | None:
+    """El último código sin usar y sin vencer de este correo.
+
+    Se toma solo el último a propósito: pedir un código nuevo invalida el
+    anterior en la práctica, porque el anterior ya no es el que se
+    consulta. Así quien recibe dos correos no tiene que adivinar cuál
+    sirve -- sirve el último.
+    """
+    return uno(
+        """SELECT * FROM core.codigo_acceso
+            WHERE lower(correo)=lower(%s) AND usado_en IS NULL
+            ORDER BY creado_en DESC LIMIT 1""",
+        (correo,),
+    )
+
+
+def sumar_intento(codigo_id: int) -> int:
+    return uno(
+        """UPDATE core.codigo_acceso SET intentos = intentos + 1
+            WHERE id=%s RETURNING intentos""",
+        (codigo_id,),
+    )["intentos"]
+
+
+def consumir_codigo(codigo_id: int) -> None:
+    ejecutar("UPDATE core.codigo_acceso SET usado_en=now() WHERE id=%s",
+             (codigo_id,))
+
+
+def limpiar_codigos(antes_de: datetime) -> int:
+    """Borra los códigos viejos. No son papel de trabajo: son secretos de
+    un minuto, y guardarlos para siempre solo acumula riesgo."""
+    with conn() as c:
+        n = c.execute("DELETE FROM core.codigo_acceso WHERE creado_en < %s",
+                      (antes_de,)).rowcount
+        c.commit()
+    return n
+
+
+def crear_usuario_por_correo(correo: str, usuario: str) -> dict:
+    """Cuenta a medio hacer: la persona probó que controla el buzón pero
+    todavía no ha llenado sus datos. `registrado_en` queda en NULL y con
+    eso el middleware la deja llegar solo al formulario de registro."""
+    return uno(
+        """INSERT INTO core.usuario (usuario, nombre, correo, rol, registrado_en)
+           VALUES (%s,%s,%s,'AUDITOR',NULL) RETURNING *""",
+        (usuario, correo, correo),
     )

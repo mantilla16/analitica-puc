@@ -23,6 +23,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 import auth
+import correo as CO
 import db
 import excel as X
 import servicios as S
@@ -67,7 +68,13 @@ def _cerrar() -> None:
 # =====================================================================
 
 # Lo único accesible sin sesión. Todo lo demás exige haber entrado.
-PUBLICAS = {"/auth/login", "/auth/estado"}
+PUBLICAS = {"/auth/estado", "/auth/codigo", "/auth/verificar"}
+
+# Con la cuenta a medio hacer -- buzon probado, datos sin llenar -- solo
+# se puede llegar a estas. No es una restriccion cosmetica: sin ella
+# alguien con un correo del dominio tendria acceso completo sin haber
+# dicho ni su nombre.
+SIN_REGISTRO = {"/auth/yo", "/auth/registro", "/auth/logout"}
 
 # Nombre legible de cada acción, derivado de la ruta. El registro se hace
 # solo, para todo método que escriba: si mañana se agrega un endpoint que
@@ -88,14 +95,16 @@ ACCIONES = [
     ("POST",   r"/observaciones/lote$",               "OBSERVACIONES_IA",     "cuenta"),
     ("POST",   r"/observacion/[^/]+$",                "OBSERVACION_IA",       "cuenta"),
     ("POST",   r"^/usuarios$",                        "USUARIO_CREADO",       "usuario"),
-    ("PUT",    r"^/usuarios/[^/]+/clave$",            "CLAVE_REINICIADA",     "usuario"),
     ("PUT",    r"^/usuarios/[^/]+$",                  "USUARIO_EDITADO",      "usuario"),
-    ("PUT",    r"^/auth/clave$",                      "CLAVE_CAMBIADA",       "usuario"),
     ("POST",   r"^/alertas/[^/]+/reconocer$",         "ALERTA_RECONOCIDA",    "alerta"),
     ("POST",   r"^/alertas/despachar$",               "ALERTAS_DESPACHADAS",  "alerta"),
 ]
 
 _ENCARGO_EN_RUTA = re.compile(r"^/encargos/([0-9a-fA-F-]{36})")
+# Hay rutas que solo nombran la carga (/cargas/{id}/procesar). Sin esto
+# quedarian fuera del control de acceso por no mencionar el encargo, que
+# es justo el tipo de hueco que la puerta unica existe para evitar.
+_CARGA_EN_RUTA = re.compile(r"^/cargas/([0-9a-fA-F-]{36})")
 
 
 def _accion_de(metodo: str, ruta: str) -> tuple[str, str | None]:
@@ -113,6 +122,36 @@ def _ip(request: Request) -> str | None:
             or (request.client.host if request.client else None))
 
 
+def _sin_acceso_al_encargo(u: dict, ruta: str) -> str | None:
+    """El motivo por el que esta persona no puede tocar este encargo, o
+    None si puede.
+
+    Va en la puerta unica y no endpoint por endpoint: filtrar la lista de
+    encargos esconde las tarjetas, no cierra el acceso -- quien tenga el
+    id lo pediria igual. Aqui se cierra para toda ruta que nombre un
+    encargo o una carga, incluidas las que se escriban manana.
+
+    Un ADMIN pasa siempre. Un encargo sin dueño lo ve solo un ADMIN.
+    """
+    if u["rol"] == "ADMIN":
+        return None
+
+    m = _ENCARGO_EN_RUTA.match(ruta)
+    encargo_id = m.group(1) if m else None
+    if not encargo_id:
+        c = _CARGA_EN_RUTA.match(ruta)
+        encargo_id = db.encargo_de_carga(c.group(1)) if c else None
+    if not encargo_id:
+        return None
+
+    dueno = db.dueno_de_encargo(encargo_id)
+    if dueno is None:
+        return "Este encargo no tiene responsable asignado; pídalo a un administrador"
+    if dueno != str(u["id"]):
+        return "Este encargo es de otro auditor"
+    return None
+
+
 @app.middleware("http")
 async def exigir_sesion(request: Request, call_next):
     """Puerta única: en vez de proteger ruta por ruta -- donde olvidar un
@@ -126,6 +165,15 @@ async def exigir_sesion(request: Request, call_next):
     u = db.usuario_de_sesion(auth.hash_token(token)) if token else None
     if not u:
         return JSONResponse({"detail": "No autenticado"}, status_code=401)
+
+    if u["registrado_en"] is None and ruta not in SIN_REGISTRO:
+        return JSONResponse(
+            {"detail": "Complete su registro para continuar",
+             "registro_pendiente": True}, status_code=403)
+
+    prohibido = _sin_acceso_al_encargo(u, ruta)
+    if prohibido:
+        return JSONResponse({"detail": prohibido}, status_code=403)
 
     request.state.usuario = u
     respuesta = await call_next(request)
@@ -171,16 +219,9 @@ def _exigir_admin(request: Request) -> dict:
     return u
 
 
-class Credenciales(BaseModel):
-    usuario: str
-    clave: str
-
-
 class UsuarioNuevo(BaseModel):
-    usuario: str
-    nombre: str
-    correo: str | None = None
-    clave: str
+    correo: str
+    nombre: str | None = None
     rol: str = "AUDITOR"
 
 
@@ -191,49 +232,172 @@ class UsuarioCambio(BaseModel):
     activo: bool | None = None
 
 
-class ClaveNueva(BaseModel):
-    clave: str
-    clave_actual: str | None = None
+class PedirCodigo(BaseModel):
+    correo: str
 
 
-@app.get("/auth/estado")
-def auth_estado() -> dict:
-    """Sin sesión: sirve para que el frontend distinga 'no hay usuarios
-    todavía' de 'no has entrado'."""
-    return {"hay_usuarios": db.hay_usuarios()}
+class VerificarCodigo(BaseModel):
+    correo: str
+    codigo: str
 
 
-@app.post("/auth/login")
-def login(c: Credenciales, request: Request, response: Response) -> dict:
-    u = db.usuario_por_nombre(c.usuario)
-    # Mismo mensaje para usuario inexistente, contraseña mala o cuenta
-    # desactivada: decir cuál de los tres falló ayuda a quien tantea.
-    if not u or not u["activo"] or not auth.verificar_clave(c.clave, u["clave_hash"]):
-        # El intento fallido sí se guarda con el motivo real: es la señal
-        # de que alguien está probando, y quien revisa la bitácora
-        # necesita distinguir un olvido de contraseña de un tanteo.
-        motivo = ("usuario inexistente" if not u
-                  else "cuenta desactivada" if not u["activo"]
-                  else "contraseña incorrecta")
-        db.registrar(usuario_id=u["id"] if u else None, usuario=c.usuario,
-                     accion="INGRESO_FALLIDO", entidad="usuario",
-                     detalle={"motivo": motivo}, exito=False, estado_http=401,
-                     ip=_ip(request), agente=request.headers.get("user-agent"))
-        raise HTTPException(401, "Usuario o contraseña incorrectos")
+class DatosRegistro(BaseModel):
+    nombre: str
+    cargo: str | None = None
+    tarjeta_profesional: str | None = None
+    telefono: str | None = None
 
+
+def _sesion_nueva(u: dict, request: Request, response: Response) -> None:
     token = auth.nuevo_token()
     expira = datetime.now(timezone.utc) + timedelta(hours=SESION_HORAS)
     db.crear_sesion(auth.hash_token(token), u["id"], expira,
                     request.headers.get("user-agent"))
-
     response.set_cookie(
         COOKIE, token, httponly=True, samesite="lax",
         secure=SESION_SEGURA, max_age=SESION_HORAS * 3600, path="/",
     )
-    db.registrar(usuario_id=u["id"], usuario=u["usuario"], accion="INGRESO",
+
+
+def _perfil(u: dict) -> dict:
+    return {"usuario": u["usuario"], "nombre": u["nombre"],
+            "correo": u["correo"], "rol": u["rol"],
+            "cargo": u.get("cargo"),
+            "tarjeta_profesional": u.get("tarjeta_profesional"),
+            "telefono": u.get("telefono"),
+            "registro_pendiente": u["registrado_en"] is None}
+
+
+@app.get("/auth/estado")
+def auth_estado() -> dict:
+    """Sin sesion. Dice el dominio con el que se entra y si el envio de
+    correo esta configurado: si no lo esta, mas vale decirlo en la
+    pantalla que dejar a la gente pidiendo codigos que no salen."""
+    sirve, falta = CO.configurado()
+    return {"dominio": auth.DOMINIO, "correo_listo": sirve,
+            "correo_problema": falta, "modo_correo": CO.modo(),
+            "largo_codigo": auth.LARGO_CODIGO,
+            "minutos_codigo": auth.MINUTOS_VIGENCIA_CODIGO}
+
+
+@app.post("/auth/codigo")
+def pedir_codigo(c: PedirCodigo, request: Request) -> dict:
+    """Manda el codigo al buzon.
+
+    Responde lo mismo exista la cuenta o no. Decir "ese correo no esta
+    registrado" convertiria esta pantalla en una forma de averiguar quien
+    trabaja en la firma, y no hace falta: si el correo es del dominio, la
+    persona tiene derecho a entrar -- la primera vez creandose la cuenta.
+    """
+    correo = auth.normalizar_correo(c.correo)
+    problema = auth.problema_con_correo(correo)
+    if problema:
+        raise HTTPException(422, problema)
+
+    desde = datetime.now(timezone.utc) - timedelta(
+        minutes=auth.MINUTOS_VENTANA_ENVIO)
+    if db.codigos_recientes(correo, desde) >= auth.MAX_CODIGOS_POR_VENTANA:
+        db.registrar(usuario=correo, accion="CODIGO_LIMITADO",
+                     entidad="usuario", exito=False, estado_http=429,
+                     detalle={"motivo": "demasiadas solicitudes"},
+                     ip=_ip(request), agente=request.headers.get("user-agent"))
+        raise HTTPException(
+            429, f"Ya se enviaron varios codigos a ese correo. Espere "
+                 f"{auth.MINUTOS_VENTANA_ENVIO} minutos o use el ultimo "
+                 f"que recibio.")
+
+    codigo = auth.nuevo_codigo()
+    expira = datetime.now(timezone.utc) + timedelta(
+        minutes=auth.MINUTOS_VIGENCIA_CODIGO)
+    fila = db.crear_codigo(correo, auth.hash_codigo(codigo), expira,
+                           _ip(request), request.headers.get("user-agent"))
+    try:
+        via = CO.enviar_codigo(correo, codigo, auth.MINUTOS_VIGENCIA_CODIGO)
+    except CO.CorreoNoConfigurado as e:
+        raise HTTPException(503, f"No se puede enviar el correo. {e}")
+    except Exception as e:
+        # El codigo ya quedo creado; se marca consumido para que no ande
+        # suelto un secreto que nadie recibio.
+        db.consumir_codigo(fila["id"])
+        raise HTTPException(502, f"El correo no salio: {e}")
+
+    # El codigo NO entra a la bitacora. Si queda constancia del envio.
+    db.registrar(usuario=correo, accion="CODIGO_ENVIADO", entidad="usuario",
+                 detalle={"via": via, "vence": expira.isoformat()},
+                 ip=_ip(request), agente=request.headers.get("user-agent"))
+    return {"enviado": True, "minutos": auth.MINUTOS_VIGENCIA_CODIGO}
+
+
+@app.post("/auth/verificar")
+def verificar_codigo(c: VerificarCodigo, request: Request,
+                     response: Response) -> dict:
+    """Cambia el codigo por una sesion. Si es la primera vez, crea la
+    cuenta a medio hacer y el frontend pide los datos.
+
+    La cuenta se crea DESPUES de comprobar el codigo, nunca antes: asi
+    nadie puebla la tabla de usuarios escribiendo correos.
+    """
+    correo = auth.normalizar_correo(c.correo)
+    problema = auth.problema_con_correo(correo)
+    if problema:
+        raise HTTPException(422, problema)
+
+    def _fallo(motivo: str, http: int = 401) -> HTTPException:
+        db.registrar(usuario=correo, accion="INGRESO_FALLIDO",
+                     entidad="usuario", detalle={"motivo": motivo},
+                     exito=False, estado_http=http, ip=_ip(request),
+                     agente=request.headers.get("user-agent"))
+        return HTTPException(http, "El codigo no es correcto o ya vencio")
+
+    fila = db.codigo_vigente(correo)
+    if not fila:
+        raise _fallo("sin codigo pendiente")
+    if fila["expira_en"] <= datetime.now(timezone.utc):
+        raise _fallo("codigo vencido")
+    if fila["intentos"] >= auth.MAX_INTENTOS_CODIGO:
+        db.consumir_codigo(fila["id"])
+        raise _fallo("codigo agotado por intentos", 429)
+    if not auth.verificar_codigo((c.codigo or "").strip(), fila["codigo_hash"]):
+        quedan = auth.MAX_INTENTOS_CODIGO - db.sumar_intento(fila["id"])
+        raise _fallo(f"codigo incorrecto (quedan {max(quedan, 0)} intentos)")
+
+    db.consumir_codigo(fila["id"])
+
+    u = db.usuario_por_correo(correo)
+    if u and not u["activo"]:
+        raise _fallo("cuenta desactivada", 403)
+    nuevo = u is None
+    if nuevo:
+        u = db.crear_usuario_por_correo(correo, correo.split("@")[0])
+
+    _sesion_nueva(u, request, response)
+    db.actualizar_usuario(u["id"], ultimo_acceso=datetime.now(timezone.utc))
+    db.registrar(usuario_id=u["id"], usuario=u["usuario"],
+                 accion="CUENTA_CREADA" if nuevo else "INGRESO",
                  entidad="usuario", ip=_ip(request),
                  agente=request.headers.get("user-agent"))
-    return {"usuario": u["usuario"], "nombre": u["nombre"], "rol": u["rol"]}
+    return _perfil(u)
+
+
+@app.put("/auth/registro")
+def completar_registro(d: DatosRegistro, request: Request) -> dict:
+    """Los datos que la persona llena la primera vez."""
+    u = _yo(request)
+    nombre = (d.nombre or "").strip()
+    if len(nombre.split()) < 2:
+        raise HTTPException(422, "Escriba su nombre y sus apellidos.")
+
+    campos = {
+        "nombre": nombre,
+        "cargo": (d.cargo or "").strip() or None,
+        "tarjeta_profesional": (d.tarjeta_profesional or "").strip() or None,
+        "telefono": (d.telefono or "").strip() or None,
+    }
+    if u["registrado_en"] is None:
+        campos["registrado_en"] = datetime.now(timezone.utc)
+    actualizado = db.actualizar_usuario(u["id"], **campos)
+    request.state.bitacora = {"nombre": nombre, "cargo": campos["cargo"]}
+    return _perfil(actualizado)
 
 
 @app.post("/auth/logout")
@@ -248,22 +412,7 @@ def logout(request: Request, response: Response) -> dict:
 
 @app.get("/auth/yo")
 def yo(request: Request) -> dict:
-    u = _yo(request)
-    return {"usuario": u["usuario"], "nombre": u["nombre"], "rol": u["rol"]}
-
-
-@app.put("/auth/clave")
-def cambiar_mi_clave(c: ClaveNueva, request: Request) -> dict:
-    """Cambio de la propia contraseña. Exige la actual: si alguien deja
-    la sesión abierta, no puede quedarse con la cuenta."""
-    u = db.usuario_por_nombre(_quien(request))
-    if not auth.verificar_clave(c.clave_actual or "", u["clave_hash"]):
-        raise HTTPException(403, "La contraseña actual no coincide")
-    problema = auth.problema_con_clave(c.clave)
-    if problema:
-        raise HTTPException(422, problema)
-    db.actualizar_usuario(u["id"], clave_hash=auth.hash_clave(c.clave))
-    return {"ok": True}
+    return _perfil(_yo(request))
 
 
 # =====================================================================
@@ -304,18 +453,35 @@ def ver_bitacora(request: Request, usuario: str | None = None,
 
 @app.post("/usuarios")
 def crear_usuario(u: UsuarioNuevo, request: Request) -> dict:
+    """Un ADMIN da de alta a alguien antes de que entre por primera vez.
+
+    Sirve para dejarle el rol puesto -- que entre siendo ADMIN, por
+    ejemplo -- o el nombre ya escrito. No hay contrasena que asignar: la
+    persona entra con su correo del dominio y un codigo, y si la cuenta ya
+    existe simplemente la reconoce.
+    """
     _exigir_admin(request)
-    problema = auth.problema_con_clave(u.clave)
+    correo = auth.normalizar_correo(u.correo)
+    problema = auth.problema_con_correo(correo)
     if problema:
         raise HTTPException(422, problema)
-    if db.usuario_por_nombre(u.usuario):
-        raise HTTPException(409, f"El usuario {u.usuario} ya existe")
+    if db.usuario_por_correo(correo):
+        raise HTTPException(409, f"Ya hay una cuenta con el correo {correo}")
     if u.rol not in ("ADMIN", "AUDITOR"):
         raise HTTPException(422, "Rol debe ser ADMIN o AUDITOR")
-    request.state.bitacora = {"usuario": u.usuario, "nombre": u.nombre,
-                              "rol": u.rol}
-    return db.crear_usuario(u.usuario, u.nombre, u.correo,
-                            auth.hash_clave(u.clave), u.rol)
+
+    nombre = (u.nombre or "").strip()
+    fila = db.crear_usuario_por_correo(correo, correo.split("@")[0])
+    campos = {"rol": u.rol}
+    if nombre:
+        # Con el nombre puesto por el admin la cuenta queda registrada y no
+        # se le pide el formulario. Sin nombre, lo llena la persona.
+        campos["nombre"] = nombre
+        campos["registrado_en"] = datetime.now(timezone.utc)
+    fila = db.actualizar_usuario(fila["id"], **campos)
+    request.state.bitacora = {"correo": correo, "rol": u.rol,
+                              "nombre": nombre or "(lo llena la persona)"}
+    return _perfil(fila)
 
 
 @app.put("/usuarios/{usuario_id}")
@@ -345,28 +511,13 @@ def editar_usuario(usuario_id: str, c: UsuarioCambio, request: Request) -> dict:
     return r
 
 
-@app.put("/usuarios/{usuario_id}/clave")
-def reiniciar_clave(usuario_id: str, c: ClaveNueva, request: Request) -> dict:
-    """Un admin asigna contraseña nueva a otro usuario, sin conocer la
-    anterior. Cierra las sesiones de esa cuenta."""
-    _exigir_admin(request)
-    objetivo = db.usuario_por_id(usuario_id)
-    if not objetivo:
-        raise HTTPException(404, "Usuario no existe")
-    request.state.bitacora = {"objetivo": objetivo["usuario"]}
-    problema = auth.problema_con_clave(c.clave)
-    if problema:
-        raise HTTPException(422, problema)
-    db.actualizar_usuario(usuario_id, clave_hash=auth.hash_clave(c.clave))
-    db.borrar_sesiones_de(usuario_id)
-    return {"ok": True}
-
-
 class EncargoNuevo(BaseModel):
+    """Sin `responsable`: sale de la sesión. Aceptarlo del cuerpo sería
+    ofrecer un campo que el servidor ignora, y eso engaña a quien lo
+    manda."""
     nit: str
     razon_social: str
     fecha_corte: date
-    responsable: str | None = None
 
 
 class MaterialidadEntrada(BaseModel):
@@ -409,15 +560,25 @@ def _carga(carga_id: str) -> dict:
 
 @app.post("/encargos")
 def abrir_encargo(e: EncargoNuevo, request: Request) -> dict:
+    """El responsable es siempre quien esta en sesion.
+
+    No se acepta del cuerpo de la peticion aunque venga: en un papel de
+    trabajo el responsable es una afirmacion sobre quien hizo el trabajo,
+    y una afirmacion que el cliente puede escribir a su antojo no prueba
+    nada. Sale de la sesion, igual que `subido_por` y `aprobado_por`.
+    """
+    u = _yo(request)
     request.state.bitacora = {"nit": e.nit, "razon_social": e.razon_social,
                               "fecha_corte": e.fecha_corte,
-                              "responsable": e.responsable}
-    return S.abrir_encargo(e.nit, e.razon_social, e.fecha_corte, e.responsable)
+                              "responsable": u["usuario"]}
+    return S.abrir_encargo(e.nit, e.razon_social, e.fecha_corte,
+                           responsable=u["usuario"], creado_por=str(u["id"]))
 
 
 @app.get("/encargos")
-def listar_encargos() -> list[dict]:
-    return db.encargos()
+def listar_encargos(request: Request) -> list[dict]:
+    u = _yo(request)
+    return db.encargos(str(u["id"]), todos=u["rol"] == "ADMIN")
 
 
 @app.get("/encargos/{encargo_id}")
