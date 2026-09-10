@@ -3,7 +3,7 @@ import { api, fecha } from "../api";
 import { Avatar, Aviso, Boton, Chip, Modal } from "../comp/Piezas";
 
 const CAMPO = "w-full px-3 py-2 text-sm";
-const VACIO = { usuario: "", nombre: "", correo: "", clave: "", rol: "AUDITOR" };
+const VACIO = { correo: "", nombre: "", rol: "AUDITOR" };
 
 /** Administración de usuarios. Solo la ve un ADMIN; el backend lo vuelve
  *  a exigir en cada ruta, porque ocultar un botón no es un control. */
@@ -13,7 +13,6 @@ export default function Usuarios({ yo, onVolver }) {
   const [form, setForm] = useState(VACIO);
   const [error, setError] = useState(null);
   const [aviso, setAviso] = useState(null);
-  const [reiniciando, setReiniciando] = useState(null);   // usuario objetivo
 
   const refrescar = useCallback(() => {
     api.usuarios().then(setLista).catch((e) => setError(e.message));
@@ -66,11 +65,23 @@ export default function Usuarios({ yo, onVolver }) {
         <form onSubmit={crear} className="panel max-w-lg p-6">
           <p className="rotulo mb-5">Nuevo usuario</p>
 
+          {/* No hay contrasena que asignar: la persona entra con su correo
+              del dominio y un codigo. Dar de alta aqui sirve para dejarle
+              el rol puesto de entrada -- que entre siendo admin, por
+              ejemplo -- o el nombre ya escrito. */}
+          <p className="mb-5 text-xs leading-relaxed text-tinta-suave">
+            No hace falta crear las cuentas: cualquiera con un correo del
+            dominio entra y se registra solo. Dé de alta a alguien aquí
+            únicamente para dejarle el rol de administrador puesto antes de
+            su primer ingreso.
+          </p>
+
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <label className="block">
-                <span className="rotulo">Usuario</span>
-                <input {...campo("usuario")} required autoComplete="off"
+                <span className="rotulo">Correo</span>
+                <input type="email" {...campo("correo")} required
+                       autoComplete="off"
                        className={`cifra ${CAMPO} mt-1.5`} />
               </label>
               <label className="block">
@@ -82,19 +93,12 @@ export default function Usuarios({ yo, onVolver }) {
               </label>
             </div>
             <label className="block">
-              <span className="rotulo">Nombre completo</span>
-              <input {...campo("nombre")} required />
-            </label>
-            <label className="block">
-              <span className="rotulo">Correo (opcional)</span>
-              <input type="email" {...campo("correo")} />
-            </label>
-            <label className="block">
-              <span className="rotulo">Contraseña inicial</span>
-              <input type="password" {...campo("clave")} required
-                     autoComplete="new-password" minLength={8} />
-              <span className="mt-1.5 block text-xs text-tinta-suave">
-                Mínimo 8 caracteres. El usuario puede cambiarla desde su menú.
+              <span className="rotulo">Nombre completo (opcional)</span>
+              <input {...campo("nombre")} />
+              <span className="mt-1.5 block text-xs leading-relaxed text-tinta-suave">
+                Si lo deja en blanco, la persona lo escribe ella misma la
+                primera vez que entre -- junto con su cargo y su tarjeta
+                profesional.
               </span>
             </label>
           </div>
@@ -131,10 +135,17 @@ export default function Usuarios({ yo, onVolver }) {
                       {soyYo && <Chip tono="cian">usted</Chip>}
                       {u.rol === "ADMIN" && <Chip tono="morado">admin</Chip>}
                       {!u.activo && <Chip tono="rojo">inactivo</Chip>}
+                      {/* Probo su buzon pero no lleno sus datos. Mientras
+                          este asi no puede hacer nada mas que el
+                          formulario, y conviene saberlo. */}
+                      {u.registrado === false && (
+                        <Chip tono="ambar">registro pendiente</Chip>
+                      )}
                     </p>
                     <p className="mt-0.5 text-xs text-tinta-suave">
-                      <span className="cifra">{u.usuario}</span>
-                      {u.correo && <> · {u.correo}</>}
+                      <span className="cifra">{u.correo ?? "sin correo: no puede entrar"}</span>
+                      {u.cargo && <> · {u.cargo}</>}
+                      {u.tarjeta_profesional && <> · T.P. {u.tarjeta_profesional}</>}
                       {" · "}
                       {u.ultimo_acceso
                         ? `último acceso ${fecha(u.ultimo_acceso)}`
@@ -143,10 +154,6 @@ export default function Usuarios({ yo, onVolver }) {
                   </div>
 
                   <div className="flex items-center gap-1">
-                    <button onClick={() => setReiniciando(u)}
-                            className="pestana text-xs">
-                      Contraseña
-                    </button>
                     {/* Un admin no puede quitarse el rol ni desactivarse:
                         el backend lo rechaza, así que tampoco se ofrece. */}
                     {!soyYo && (
@@ -180,82 +187,12 @@ export default function Usuarios({ yo, onVolver }) {
             Los usuarios se desactivan, no se borran: los papeles de trabajo
             registran quién cargó cada archivo y quién aprobó cada
             materialidad, y ese rastro debe seguir siendo legible.
+            Desactivar cierra sus sesiones abiertas de inmediato y le impide
+            volver a entrar, aunque su correo siga siendo del dominio.
           </p>
         </>
       )}
 
-      {reiniciando && (
-        <ReiniciarClave
-          objetivo={reiniciando}
-          onCerrar={() => setReiniciando(null)}
-          onListo={(msg) => { setReiniciando(null); setAviso(msg); }}
-        />
-      )}
     </div>
-  );
-}
-
-/** Asignar contraseña a otro usuario. Reemplaza al window.prompt, que
- *  además de verse ajeno mostraba la contraseña en claro al escribirla. */
-function ReiniciarClave({ objetivo, onCerrar, onListo }) {
-  const [clave, setClave] = useState("");
-  const [repetida, setRepetida] = useState("");
-  const [error, setError] = useState(null);
-  const [ocupado, setOcupado] = useState(false);
-
-  async function guardar(e) {
-    e.preventDefault();
-    setError(null);
-    if (clave !== repetida) return setError("Las contraseñas no coinciden.");
-    setOcupado(true);
-    try {
-      await api.reiniciarClave(objetivo.id, clave);
-      onListo(`Contraseña de ${objetivo.nombre} actualizada. Sus sesiones se cerraron.`);
-    } catch (err) {
-      setError(err.detalle ?? err.message);
-    } finally { setOcupado(false); }
-  }
-
-  return (
-    <Modal rotulo="Administración" titulo="Asignar contraseña" onCerrar={onCerrar}>
-      <div className="mb-5 flex items-center gap-3 rounded-[8px] bg-papel-hondo p-3">
-        <Avatar nombre={objetivo.nombre} admin={objetivo.rol === "ADMIN"} tam={32} />
-        <div className="min-w-0">
-          <p className="truncate text-sm font-semibold">{objetivo.nombre}</p>
-          <p className="cifra text-xs text-tinta-suave">{objetivo.usuario}</p>
-        </div>
-      </div>
-
-      <form onSubmit={guardar} className="space-y-4">
-        {error && <Aviso tono="error">{String(error)}</Aviso>}
-        <label className="block">
-          <span className="rotulo">Nueva contraseña</span>
-          <input type="password" value={clave} required autoFocus minLength={8}
-                 autoComplete="new-password"
-                 onChange={(e) => setClave(e.target.value)}
-                 className={`${CAMPO} mt-1.5`} />
-          <span className="mt-1.5 block text-xs text-tinta-suave">Mínimo 8 caracteres.</span>
-        </label>
-        <label className="block">
-          <span className="rotulo">Repetir</span>
-          <input type="password" value={repetida} required
-                 autoComplete="new-password"
-                 onChange={(e) => setRepetida(e.target.value)}
-                 className={`${CAMPO} mt-1.5`} />
-        </label>
-
-        <Aviso tono="alerta">
-          Las sesiones abiertas de {objetivo.nombre} se cerrarán. Tendrá que
-          entrar de nuevo con la contraseña que le entregue.
-        </Aviso>
-
-        <div className="flex gap-3 pt-1">
-          <Boton type="submit" disabled={ocupado}>
-            {ocupado ? "Guardando…" : "Asignar"}
-          </Boton>
-          <Boton type="button" variante="texto" onClick={onCerrar}>Cancelar</Boton>
-        </div>
-      </form>
-    </Modal>
   );
 }

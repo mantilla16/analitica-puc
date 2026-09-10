@@ -29,11 +29,13 @@ const json = (metodo, cuerpo) => ({
 
 export const api = {
   // ------------------------------------------------------------ sesión
-  login: (usuario, clave) => pedir("/auth/login", json("POST", { usuario, clave })),
+  estadoAuth: () => pedir("/auth/estado"),
+  pedirCodigo: (correo) => pedir("/auth/codigo", json("POST", { correo })),
+  verificarCodigo: (correo, codigo) =>
+    pedir("/auth/verificar", json("POST", { correo, codigo })),
+  registrarme: (d) => pedir("/auth/registro", json("PUT", d)),
   logout: () => pedir("/auth/logout", { method: "POST" }),
   yo: () => pedir("/auth/yo"),
-  cambiarMiClave: (clave_actual, clave) =>
-    pedir("/auth/clave", json("PUT", { clave_actual, clave })),
 
   auditores: () => pedir("/usuarios/activos"),
   usuarios: () => pedir("/usuarios"),
@@ -44,7 +46,6 @@ export const api = {
   },
   crearUsuario: (d) => pedir("/usuarios", json("POST", d)),
   editarUsuario: (id, d) => pedir(`/usuarios/${id}`, json("PUT", d)),
-  reiniciarClave: (id, clave) => pedir(`/usuarios/${id}/clave`, json("PUT", { clave })),
 
   encargos: () => pedir("/encargos"),
   encargo: (id) => pedir(`/encargos/${id}`),

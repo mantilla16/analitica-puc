@@ -21,7 +21,7 @@ const TRAZO = {
 /**
  * Todo lo de la cuenta en un solo lugar. Antes eran botones sueltos en la
  * esquina: cada opción nueva competía con las demás por atención, y aun
- * así faltaba lo más básico -- cambiar la propia contraseña.
+ * así faltaba lo más básico -- corregir sus propios datos.
  */
 export default function MenuUsuario({ yo, vista, onIr, onSalir }) {
   const [abierto, setAbierto] = useState(false);
@@ -99,7 +99,7 @@ export default function MenuUsuario({ yo, vista, onIr, onSalir }) {
             <button className={opcion}
                     onClick={() => { setAbierto(false); setCambiando(true); }}>
               <Icono d={TRAZO.clave} />
-              Cambiar contraseña
+              Mis datos
             </button>
           </div>
 
@@ -113,83 +113,108 @@ export default function MenuUsuario({ yo, vista, onIr, onSalir }) {
         </div>
       )}
 
-      {cambiando && <CambiarClave onCerrar={() => setCambiando(false)} />}
+      {cambiando && <MisDatos yo={yo} onCerrar={() => setCambiando(false)} />}
     </div>
   );
 }
 
-/** Cambio de la propia contraseña. Exige la actual: si alguien deja la
- *  sesión abierta, no puede quedarse con la cuenta. */
-function CambiarClave({ onCerrar }) {
-  const [actual, setActual] = useState("");
-  const [nueva, setNueva] = useState("");
-  const [repetida, setRepetida] = useState("");
+/** Los datos con que la persona firma sus papeles.
+ *
+ *  Ya no hay contraseña que cambiar, pero sí hace falta poder corregir un
+ *  nombre mal escrito o agregar la tarjeta profesional después: son los
+ *  datos que salen impresos en el papel de trabajo, y un dato equivocado
+ *  ahí se propaga a todo lo que se firme.
+ *
+ *  Escribe contra el mismo endpoint del registro inicial, que solo marca
+ *  la fecha de registro si estaba vacía -- así corregir datos después no
+ *  reabre el formulario obligatorio.
+ */
+function MisDatos({ yo, onCerrar }) {
+  const [d, setD] = useState({
+    nombre: yo?.nombre ?? "",
+    cargo: yo?.cargo ?? "",
+    tarjeta_profesional: yo?.tarjeta_profesional ?? "",
+    telefono: yo?.telefono ?? "",
+  });
   const [error, setError] = useState(null);
   const [listo, setListo] = useState(false);
   const [ocupado, setOcupado] = useState(false);
 
+  const puedeGuardar = d.nombre.trim().split(/\s+/).length >= 2;
+
   async function guardar(e) {
     e.preventDefault();
     setError(null);
-    if (nueva !== repetida) return setError("Las contraseñas nuevas no coinciden.");
     setOcupado(true);
     try {
-      await api.cambiarMiClave(actual, nueva);
+      await api.registrarme(d);
       setListo(true);
     } catch (err) {
-      setError(err.estado === 403
-        ? "La contraseña actual no coincide."
-        : (err.detalle ?? err.message));
+      setError(err.detalle ?? err.message);
     } finally { setOcupado(false); }
   }
 
   const campo = "w-full px-3 py-2 text-sm";
+  const set = (k) => (e) => setD({ ...d, [k]: e.target.value });
 
   return (
-    <Modal rotulo="Su cuenta" titulo="Cambiar contraseña" onCerrar={onCerrar}>
-        {listo ? (
-          <>
-            <Aviso tono="ok">Contraseña actualizada.</Aviso>
-            <div className="mt-5 flex justify-end">
-              <Boton variante="contorno" onClick={onCerrar}>Listo</Boton>
-            </div>
-          </>
-        ) : (
-          <form onSubmit={guardar} className="space-y-4">
-            {error && <Aviso tono="error">{String(error)}</Aviso>}
+    <Modal rotulo="Su cuenta" titulo="Mis datos" onCerrar={onCerrar}
+           ancho="max-w-md">
+      {listo ? (
+        <>
+          <Aviso tono="ok">
+            Datos actualizados. Se verán reflejados al recargar.
+          </Aviso>
+          <div className="mt-5 flex justify-end">
+            <Boton variante="contorno" onClick={onCerrar}>Listo</Boton>
+          </div>
+        </>
+      ) : (
+        <form onSubmit={guardar} className="space-y-4">
+          {error && <Aviso tono="error">{String(error)}</Aviso>}
+
+          <p className="text-xs leading-relaxed text-tinta-suave">
+            Entra con <span className="cifra">{yo?.correo}</span>. El correo
+            es su identidad en el sistema y no se cambia desde aquí: pídalo
+            a un administrador.
+          </p>
+
+          <label className="block">
+            <span className="rotulo">Nombre y apellidos</span>
+            <input value={d.nombre} onChange={set("nombre")} required autoFocus
+                   autoComplete="name" className={`${campo} mt-1.5`} />
+          </label>
+
+          <label className="block">
+            <span className="rotulo">Cargo</span>
+            <input value={d.cargo} onChange={set("cargo")}
+                   placeholder="Auditor senior, revisor fiscal…"
+                   className={`${campo} mt-1.5`} />
+          </label>
+
+          <div className="grid gap-4 sm:grid-cols-2">
             <label className="block">
-              <span className="rotulo">Contraseña actual</span>
-              <input type="password" value={actual} required autoFocus
-                     autoComplete="current-password"
-                     onChange={(e) => setActual(e.target.value)}
-                     className={`${campo} mt-1.5`} />
+              <span className="rotulo">Tarjeta profesional</span>
+              <input value={d.tarjeta_profesional}
+                     onChange={set("tarjeta_profesional")}
+                     className={`${campo} mt-1.5 cifra`} />
             </label>
             <label className="block">
-              <span className="rotulo">Nueva contraseña</span>
-              <input type="password" value={nueva} required minLength={8}
-                     autoComplete="new-password"
-                     onChange={(e) => setNueva(e.target.value)}
-                     className={`${campo} mt-1.5`} />
-              <span className="mt-1 block text-xs text-tinta-suave">
-                Mínimo 8 caracteres.
-              </span>
+              <span className="rotulo">Teléfono</span>
+              <input value={d.telefono} onChange={set("telefono")}
+                     inputMode="tel" className={`${campo} mt-1.5 cifra`} />
             </label>
-            <label className="block">
-              <span className="rotulo">Repetir la nueva</span>
-              <input type="password" value={repetida} required
-                     autoComplete="new-password"
-                     onChange={(e) => setRepetida(e.target.value)}
-                     className={`${campo} mt-1.5`} />
-            </label>
-            <div className="flex gap-3 pt-1">
-              <Boton type="submit" disabled={ocupado}>
-                {ocupado ? "Guardando…" : "Cambiar"}
-              </Boton>
-              <Boton type="button" variante="texto" onClick={onCerrar}>
-                Cancelar
-              </Boton>
-            </div>
-          </form>
+          </div>
+
+          <div className="flex gap-3 pt-1">
+            <Boton type="submit" disabled={ocupado || !puedeGuardar}>
+              {ocupado ? "Guardando…" : "Guardar"}
+            </Boton>
+            <Boton type="button" variante="texto" onClick={onCerrar}>
+              Cancelar
+            </Boton>
+          </div>
+        </form>
       )}
     </Modal>
   );

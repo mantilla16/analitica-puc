@@ -6,29 +6,12 @@ export default function Encargos({ yo, onAbrir }) {
   const [lista, setLista] = useState([]);
   const [creando, setCreando] = useState(false);
   const [error, setError] = useState(null);
-  const [auditores, setAuditores] = useState([]);
   const [borrando, setBorrando] = useState(null);   // encargo por confirmar
   const [form, setForm] = useState({
-    nit: "", razon_social: "", fecha_corte: "", responsable: "",
+    nit: "", razon_social: "", fecha_corte: "",
   });
 
   useEffect(() => { refrescar(); }, []);
-
-  /* El responsable por defecto es quien está trabajando, pero la lista
-     solo trae auditores: si quien entró es ADMIN no aparece en ella, y
-     dejar su usuario en el formulario mandaría un valor que el selector
-     no muestra. En ese caso se toma el primero de la lista. */
-  useEffect(() => {
-    api.auditores().then((lista) => {
-      setAuditores(lista);
-      setForm((f) => ({
-        ...f,
-        responsable: lista.some((a) => a.usuario === yo?.usuario)
-          ? yo.usuario
-          : (lista[0]?.usuario ?? ""),
-      }));
-    }).catch(() => {});
-  }, [yo?.usuario]);
 
   function refrescar() {
     api.encargos().then(setLista).catch((e) => setError(e.message));
@@ -145,20 +128,21 @@ export default function Encargos({ yo, onAbrir }) {
               </span>
             </label>
 
-            <label className="block">
+            {/* El responsable ya no se escoge: es quien esta en sesion, y lo
+                pone el servidor. Un selector aqui daria a entender que se
+                puede abrir un encargo a nombre de otro, y el servidor
+                ignoraria el valor. */}
+            <div>
               <span className="rotulo">Responsable</span>
-              <select {...campo("responsable")} required
-                      className={`${campo("responsable").className} mt-1`}>
-                {auditores.length === 0 && (
-                  <option value="">No hay auditores registrados</option>
-                )}
-                {auditores.map((a) => (
-                  <option key={a.usuario} value={a.usuario}>
-                    {a.nombre}{a.usuario === yo?.usuario ? " (usted)" : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
+              <p className="mt-1 py-2 text-sm font-medium">
+                {yo?.nombre ?? "—"}
+                <span className="ml-1.5 text-xs text-tinta-suave">(usted)</span>
+              </p>
+              <span className="mt-1 block text-xs leading-snug text-tinta-suave">
+                Queda a su nombre y solo usted lo ve. Los papeles que salgan
+                de este encargo se firman con estos datos.
+              </span>
+            </div>
           </div>
 
           <div className="mt-8 flex gap-3">

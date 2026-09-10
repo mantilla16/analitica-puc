@@ -421,7 +421,10 @@ def yo(request: Request) -> dict:
 
 @app.get("/usuarios/activos")
 def usuarios_activos() -> list[dict]:
-    """Usuario y nombre de quienes pueden ser responsables de un encargo.
+    """Usuario y nombre de los auditores activos.
+
+    Ya no alimenta ningún selector de responsable -- el responsable sale de
+    la sesión -- pero se conserva para nombrar a quien firmó un papel.
     Disponible para cualquier sesión: no expone rol, correo ni estado."""
     return db.usuarios_activos()
 

@@ -7,16 +7,23 @@ import { monto, entero } from "../api";
  * en claro lo que se escribe -- inaceptable para una contraseña.
  */
 export function Modal({ titulo, rotulo, onCerrar, children, ancho = "max-w-sm" }) {
+  // Sin `onCerrar` el diálogo no se puede cerrar: ni con Escape, ni
+  // clicando fuera, ni con la ✕. Es para lo que hay que completar antes
+  // de seguir -- el registro de la primera vez -- donde una salida
+  // llevaría a una aplicación que rechaza todo sin decir por qué.
+  const cerrable = typeof onCerrar === "function";
+
   useEffect(() => {
+    if (!cerrable) return;
     const escape = (e) => { if (e.key === "Escape") onCerrar(); };
     document.addEventListener("keydown", escape);
     return () => document.removeEventListener("keydown", escape);
-  }, [onCerrar]);
+  }, [onCerrar, cerrable]);
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center
                     bg-tinta/25 p-6 backdrop-blur-[2px]"
-         onClick={onCerrar}>
+         onClick={cerrable ? onCerrar : undefined}>
       <div className={`panel deslizar w-full ${ancho} p-6 shadow-[var(--sombra-alta)]`}
            onClick={(e) => e.stopPropagation()}>
         <div className="mb-5 flex items-start justify-between gap-4">
@@ -24,9 +31,11 @@ export function Modal({ titulo, rotulo, onCerrar, children, ancho = "max-w-sm" }
             {rotulo && <p className="rotulo">{rotulo}</p>}
             <h2 className="mt-1 text-lg font-semibold">{titulo}</h2>
           </div>
-          <button onClick={onCerrar} className="rotulo shrink-0 hover:text-tinta">
-            Cerrar ✕
-          </button>
+          {cerrable && (
+            <button onClick={onCerrar} className="rotulo shrink-0 hover:text-tinta">
+              Cerrar ✕
+            </button>
+          )}
         </div>
         {children}
       </div>

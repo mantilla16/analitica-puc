@@ -771,7 +771,9 @@ def usuario_por_id(usuario_id: str) -> dict | None:
 
 def usuarios() -> list[dict]:
     return varios(
-        """SELECT id, usuario, nombre, correo, rol, activo, creado_en, ultimo_acceso
+        """SELECT id, usuario, nombre, correo, rol, activo, creado_en,
+                  ultimo_acceso, cargo, tarjeta_profesional, telefono,
+                  (registrado_en IS NOT NULL) AS registrado
            FROM core.usuario ORDER BY activo DESC, usuario"""
     )
 
@@ -806,9 +808,12 @@ def actualizar_usuario(usuario_id: str, **campos: Any) -> dict | None:
     if not campos:
         return usuario_por_id(usuario_id)
     sets = ", ".join(f"{k}=%s" for k in campos)
+    # Devuelve la fila completa a proposito: enumerar columnas obliga a
+    # acordarse de ampliar la lista cada vez que se agrega un campo, y
+    # olvidarlo produce un KeyError lejos de aqui. `clave_hash` ya no se
+    # usa, y ninguna respuesta de la API devuelve esta fila cruda.
     return uno(
-        f"""UPDATE core.usuario SET {sets} WHERE id=%s
-            RETURNING id, usuario, nombre, correo, rol, activo, creado_en""",
+        f"""UPDATE core.usuario SET {sets} WHERE id=%s RETURNING *""",
         (*campos.values(), usuario_id),
     )
 
@@ -833,7 +838,8 @@ def usuario_de_sesion(token_hash: str) -> dict | None:
     """El usuario dueño de una sesión viva. Un usuario desactivado deja
     de entrar de inmediato, aunque su sesión siga vigente."""
     return uno(
-        """SELECT u.id, u.usuario, u.nombre, u.correo, u.rol, u.activo
+        """SELECT u.id, u.usuario, u.nombre, u.correo, u.rol, u.activo,
+                  u.cargo, u.tarjeta_profesional, u.telefono, u.registrado_en
            FROM core.sesion s JOIN core.usuario u ON u.id = s.usuario_id
            WHERE s.token_hash=%s AND s.expira_en > now() AND u.activo""",
         (token_hash,),
