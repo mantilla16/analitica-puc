@@ -169,8 +169,38 @@ def a_booleano(v: Any) -> bool:
 
 # ------------------------------------------------------------- inspección
 
+MAX_FILAS_BUSQUEDA_ADICIONAL = 3
+MAX_FILAS_HASTA_DATOS = 6
+
+
+def _es_fila_datos(fila: tuple) -> bool:
+    """Heurística: una fila es de datos si la columna 0 tiene solo dígitos
+    (código de cuenta contable). Los encabezados nunca son puros numéricos."""
+    if not fila:
+        return False
+    v0 = fila[0]
+    if v0 is None:
+        return False
+    s = str(v0).strip()
+    return bool(s) and s.isdigit()
+
+
+# Textos que en filas adicionales se interpretan como encabezados de columna
+# (no como datos de cuentas). Se usa para fusionar encabezados multi-fila
+# cuando el ERP (p. ej. SIESA 2025) pone "Descripción" debajo de "Cuentas"
+# en la misma columna.
+ENCABEZADOS_FILAS_ADICIONALES = {"descripcion"}
+
+
 def _detectar_encabezado(ws) -> tuple[int | None, list[dict]]:
-    """Fila con más celdas de texto: es el encabezado. Devuelve (fila, columnas)."""
+    """Fila con más celdas de texto: es el encabezado. Devuelve (fila, columnas).
+
+    Cuando los encabezados están repartidos en varias filas contiguas (p. ej.
+    SIESA pone "Cuentas" en la fila 12 y "Descripción" en la fila 13 porque
+    la celda B12 está vacía o porque está en la misma columna pero en otra
+    fila), se fusionan: se buscan encabezados adicionales en filas entre la
+    principal y la primera fila de datos.
+    """
     mejor_fila, mejor_puntaje, mejor_celdas = None, 0, []
 
     for i, fila in enumerate(_filas(ws, max_row=MAX_FILAS_ESCANEO), start=1):
@@ -183,6 +213,48 @@ def _detectar_encabezado(ws) -> tuple[int | None, list[dict]]:
         ]
         if len(celdas) >= MIN_CELDAS_ENCABEZADO and len(celdas) > mejor_puntaje:
             mejor_fila, mejor_puntaje, mejor_celdas = i, len(celdas), celdas
+
+    if mejor_fila is None:
+        return None, []
+
+    # --- fusión multi-fila: buscar encabezados adicionales ---------------
+    # Se busca entre la fila principal y la primera fila de datos (o un
+    # máximo de MAX_FILAS_BUSQUEDA_ADICIONAL filas).
+    #
+    # Caso A (SIESA 2026): "Descripción" está en una columna vacía de la
+    #   fila principal → se añade directamente.
+    # Caso B (SIESA 2025): "Descripción" está en la MISMA columna que
+    #   "Cuentas" → se detecta como encabezado adicional y se añade con un
+    #   índice sintético para que el mapeo lo ubique.
+    ocupadas = {c["indice"] for c in mejor_celdas}
+    limite = mejor_fila + MAX_FILAS_BUSQUEDA_ADICIONAL
+    for num_fila, fila in enumerate(
+        _filas(ws, min_row=mejor_fila + 1, max_row=limite),
+        start=mejor_fila + 1,
+    ):
+        if not fila:
+            continue
+        if _es_fila_datos(fila):
+            break
+        for j, v in enumerate(fila):
+            if v is not None and isinstance(v, str) and v.strip():
+                texto_norm = norm(v)
+                if j not in ocupadas:
+                    # caso A: columna vacía en la fila principal
+                    mejor_celdas.append({"indice": j, "texto": str(v).strip()})
+                    ocupadas.add(j)
+                elif texto_norm in ENCABEZADOS_FILAS_ADICIONALES:
+                    # caso B: misma columna pero es un encabezado conocido
+                    # Se usa índice sintético negativo para distinguirlo del
+                    # encabezado primario en la misma posición.
+                    idx_sintetico = -j - 1
+                    mejor_celdas.append({
+                        "indice": idx_sintetico,
+                        "texto": str(v).strip(),
+                    })
+
+    # reordenar: primarios por índice, luego sintéticos
+    mejor_celdas.sort(key=lambda c: (c["indice"] < 0, c["indice"]))
 
     return mejor_fila, mejor_celdas
 
@@ -264,7 +336,14 @@ def inspeccionar(
 # ----------------------------------------------------------------- parseo
 
 def _indices(columnas_perfil: dict[str, str], celdas: list[dict]) -> dict[str, int]:
-    """campo canónico -> índice real de columna EN ESTE archivo."""
+    """campo canónico -> índice real de columna EN ESTE archivo.
+
+    Soporta índices sintéticos (negativos) generados por la fusión multi-fila.
+    Un índice negativo -j-1 significa que el encabezado está en la columna j
+    pero en una fila adicional (p. ej. "Descripción" debajo de "Cuentas" en
+    la misma columna). Se resuelve mapeando el campo al índice j y marcando
+    que el valor viene de una fila auxiliar.
+    """
     por_norma = {norm(c["texto"]): c["indice"] for c in celdas}
     faltantes, idx = [], {}
     for campo, encabezado in columnas_perfil.items():
@@ -322,7 +401,12 @@ def parsear(ruta: str | Path, perfil: dict, naturaleza: str) -> Iterator[dict]:
                     raise
                 continue          # hoja auxiliar sin los encabezados esperados
 
-            n_col = max(idx.values()) + 1
+            # Separar índices reales de los sintéticos (negativos).
+            # Los sintéticos corresponden a encabezados en filas adicionales
+            # que no se pueden leer de la misma columna de datos (p. ej.
+            # "Descripción" debajo de "Cuentas" en SIESA 2025).
+            idx_real = {k: v for k, v in idx.items() if v >= 0}
+            n_col = max(idx_real.values()) + 1 if idx_real else 0
 
             for n, fila in enumerate(_filas(ws, min_row=fila_enc + 1),
                                      start=fila_enc + 1):
@@ -330,11 +414,16 @@ def parsear(ruta: str | Path, perfil: dict, naturaleza: str) -> Iterator[dict]:
                     continue
                 fila = tuple(fila) + (None,) * (n_col - len(fila))
 
-                if _descartable(fila[idx["codigo_puc"]]):
+                if "codigo_puc" in idx_real and _descartable(fila[idx_real["codigo_puc"]]):
                     continue
 
                 out: dict[str, Any] = {"fila_origen": n, "hoja": nombre}
                 for campo, j in idx.items():
+                    if j < 0:
+                        # índice sintético: el valor no está en esta fila
+                        # (vino de una fila adicional durante la inspección)
+                        out[campo] = None
+                        continue
                     v = fila[j]
                     if campo in NUMERICOS:
                         out[campo] = a_numero(v)
