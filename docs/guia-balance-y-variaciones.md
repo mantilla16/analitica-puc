@@ -52,7 +52,7 @@ Las variaciones se calculan sobre el saldo en **Naturaleza**, no sobre el signo 
 - Variacion = saldo actual en naturaleza - saldo comparativo en naturaleza.
 - Porcentaje = variacion / valor absoluto del saldo comparativo. Si el comparativo es cero, no se calcula porcentaje.
 
-La materialidad de ejecucion, el porcentaje de variacion y el piso de trivialidad los configura el auditor para cada encargo y fase. Si la fase no tiene una materialidad aplicable, el sistema muestra todas las cuentas pero no marca ninguna automaticamente.
+La materialidad de ejecucion, el porcentaje de variacion y el error trivial los configura el auditor para cada encargo y fase. Si la fase no tiene una materialidad aplicable, el sistema muestra todas las cuentas pero no marca ninguna automaticamente.
 
 ## Filtros de Variaciones
 
@@ -60,7 +60,7 @@ La materialidad de ejecucion, el porcentaje de variacion y el piso de trivialida
 | --- | --- |
 | **Para revisar** | Reune todas las cuentas seleccionadas por uno de los criterios de abajo. |
 | **Monto** | El valor absoluto de la variacion alcanza o supera la materialidad de ejecucion. Tiene prioridad sobre los demas motivos. |
-| **Comportamiento** | El porcentaje de variacion alcanza el porcentaje configurado y la variacion supera el piso de trivialidad. |
+| **Comportamiento** | El porcentaje de variacion alcanza el porcentaje configurado y la variacion supera el error trivial. |
 | **Nuevas** | El saldo comparativo es cero y el saldo actual no es trivial. |
 | **Cerradas** | El saldo actual es cero y el comparativo no es trivial. |
 | **Naturaleza** | El saldo actual, o el comparativo si la cuenta ya no existe en el actual, queda contrario a su naturaleza y no es trivial. |
@@ -70,4 +70,4 @@ Cada cuenta recibe un unico motivo, en este orden: **Monto**, **Nueva**, **Cerra
 
 ## Lo que queda fuera de la seleccion
 
-Las cuentas no seleccionadas se separan entre las que estan por debajo del piso de trivialidad y las que no son triviales pero no alcanzan ningun criterio. La suma de sus variaciones absolutas se muestra como residuo no seleccionado. Si ese residuo supera la materialidad de la fase, se advierte que el alcance podria ser insuficiente.
+Las cuentas no seleccionadas se separan entre las que estan por debajo del error trivial y las que no son triviales pero no alcanzan ningun criterio. La suma de sus variaciones absolutas se muestra como residuo no seleccionado. Si ese residuo supera la materialidad de la fase, se advierte que el alcance podria ser insuficiente.
