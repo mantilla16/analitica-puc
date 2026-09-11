@@ -83,6 +83,7 @@ SIN_REGISTRO = {"/auth/yo", "/auth/registro", "/auth/logout"}
 ACCIONES = [
     ("POST",   r"^/auth/logout$",                     "SALIDA",               "usuario"),
     ("POST",   r"^/encargos$",                        "ENCARGO_CREADO",       "encargo"),
+    ("PUT",    r"^/encargos/[^/]+/responsable$",      "ENCARGO_REASIGNADO",   "encargo"),
     ("DELETE", r"^/encargos/[^/]+$",                  "ENCARGO_BORRADO",      "encargo"),
     ("POST",   r"^/encargos/[^/]+/cargas$",           "ARCHIVO_SUBIDO",       "carga"),
     ("POST",   r"^/cargas/[^/]+/mapeo$",              "MAPEO_CONFIRMADO",     "carga"),
@@ -523,6 +524,10 @@ class EncargoNuevo(BaseModel):
     fecha_corte: date
 
 
+class ReasignarEncargo(BaseModel):
+    usuario_id: str
+
+
 class MaterialidadEntrada(BaseModel):
     valor: Decimal | None = None
     porcentaje: Decimal | None = None
@@ -571,11 +576,16 @@ def abrir_encargo(e: EncargoNuevo, request: Request) -> dict:
     nada. Sale de la sesion, igual que `subido_por` y `aprobado_por`.
     """
     u = _yo(request)
+    # `responsable` guarda el NOMBRE, no el usuario de acceso: es el texto
+    # que sale impreso en el papel, en el Excel y en la conclusion, y un
+    # papel de trabajo lo firma una persona, no una cuenta. Quien puede
+    # entrar al encargo lo decide `creado_por`, que sigue siendo el id.
     request.state.bitacora = {"nit": e.nit, "razon_social": e.razon_social,
                               "fecha_corte": e.fecha_corte,
-                              "responsable": u["usuario"]}
+                              "responsable": u["nombre"],
+                              "usuario": u["usuario"]}
     return S.abrir_encargo(e.nit, e.razon_social, e.fecha_corte,
-                           responsable=u["usuario"], creado_por=str(u["id"]))
+                           responsable=u["nombre"], creado_por=str(u["id"]))
 
 
 @app.get("/encargos")
@@ -590,6 +600,35 @@ def ver_encargo(encargo_id: str) -> dict:
     if not enc:
         raise HTTPException(404, "Encargo no existe")
     return {**enc, "materialidades": db.materialidades(encargo_id)}
+
+
+@app.put("/encargos/{encargo_id}/responsable")
+def reasignar_encargo(encargo_id: str, d: ReasignarEncargo,
+                      request: Request) -> dict:
+    """Solo un administrador puede transferir el acceso a un encargo.
+
+    El dueño no se toma del navegador como texto libre: se valida contra una
+    cuenta activa y se actualizan juntos el id que protege el acceso y el
+    responsable que aparece en los papeles de trabajo.
+    """
+    _exigir_admin(request)
+    enc = db.encargo(encargo_id)
+    if not enc:
+        raise HTTPException(404, "Encargo no existe")
+    destino = db.usuario_por_id(d.usuario_id)
+    if not destino:
+        raise HTTPException(404, "El usuario elegido no existe")
+    if not destino["activo"]:
+        raise HTTPException(409, "No puede asignar un encargo a un usuario inactivo")
+
+    anterior = enc.get("responsable") or "sin responsable"
+    r = db.reasignar_encargo(encargo_id, str(destino["id"]), destino["nombre"])
+    request.state.bitacora = {
+        "razon_social": enc["razon_social"], "antes": anterior,
+        "despues": destino["nombre"], "usuario": destino["usuario"],
+        "destino_id": str(destino["id"]),
+    }
+    return {**(r or {}), "creado_por_nombre": destino["nombre"]}
 
 
 @app.delete("/encargos/{encargo_id}")

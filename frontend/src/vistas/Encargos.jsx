@@ -1,17 +1,25 @@
 import { useEffect, useState } from "react";
 import { api, fecha } from "../api";
-import { Aviso, Boton, Chip, Confirmar } from "../comp/Piezas";
+import { Aviso, Boton, Chip, Confirmar, Modal } from "../comp/Piezas";
 
 export default function Encargos({ yo, onAbrir }) {
   const [lista, setLista] = useState([]);
   const [creando, setCreando] = useState(false);
   const [error, setError] = useState(null);
   const [borrando, setBorrando] = useState(null);   // encargo por confirmar
+  const [asignando, setAsignando] = useState(null);
+  const [usuarios, setUsuarios] = useState([]);
+  const [destino, setDestino] = useState("");
   const [form, setForm] = useState({
     nit: "", razon_social: "", fecha_corte: "",
   });
 
   useEffect(() => { refrescar(); }, []);
+
+  useEffect(() => {
+    if (yo?.rol !== "ADMIN") return;
+    api.usuarios().then((r) => setUsuarios(r.filter((u) => u.activo))).catch((e) => setError(e.message));
+  }, [yo?.rol]);
 
   function refrescar() {
     api.encargos().then(setLista).catch((e) => setError(e.message));
@@ -33,6 +41,23 @@ export default function Encargos({ yo, onAbrir }) {
     try {
       const enc = await api.crearEncargo(form);
       onAbrir(enc.id);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  function abrirAsignacion(enc) {
+    setAsignando(enc);
+    setDestino(enc.creado_por ?? "");
+  }
+
+  async function reasignar() {
+    if (!asignando || !destino) return;
+    setError(null);
+    try {
+      await api.reasignarEncargo(asignando.id, destino);
+      setAsignando(null);
+      refrescar();
     } catch (err) {
       setError(err.message);
     }
@@ -88,10 +113,24 @@ export default function Encargos({ yo, onAbrir }) {
                       <span className="cifra block text-xs text-tinta-suave">{e.nit}</span>
                     </span>
                     <span className="cifra text-sm">{fecha(e.fecha_corte)}</span>
+                    {yo?.rol === "ADMIN" && (
+                      <span className="hidden text-xs text-tinta-suave sm:inline">
+                        {e.creado_por_nombre ?? "Sin asignar"}
+                      </span>
+                    )}
                     <Chip tono={e.estado === "ABIERTO" ? "verde" : "gris"}>
                       {e.estado}
                     </Chip>
                   </button>
+                  {yo?.rol === "ADMIN" && (
+                    <button
+                      onClick={(ev) => { ev.stopPropagation(); abrirAsignacion(e); }}
+                      className="rotulo shrink-0 text-tinta-suave hover:text-marca"
+                      title="Cambiar el responsable del encargo"
+                    >
+                      Asignar
+                    </button>
+                  )}
                   <button
                     onClick={(ev) => { ev.stopPropagation(); setBorrando(e); }}
                     className="rotulo shrink-0 text-tinta-suave hover:text-rojo"
@@ -174,6 +213,32 @@ export default function Encargos({ yo, onAbrir }) {
             pero habrá que volver a asignarlos en un encargo nuevo.
           </p>
         </Confirmar>
+      )}
+
+      {asignando && (
+        <Modal titulo={`Asignar ${asignando.razon_social}`} rotulo="Administrador"
+               onCerrar={() => setAsignando(null)}>
+          <p className="text-sm leading-relaxed text-tinta-media">
+            El usuario elegido verá este encargo y pasará a figurar como su
+            responsable. El cambio queda registrado en la bitácora.
+          </p>
+          <label className="mt-5 block">
+            <span className="rotulo">Responsable</span>
+            <select value={destino} onChange={(e) => setDestino(e.target.value)}
+                    className="mt-1.5 w-full px-3 py-2 text-sm">
+              <option value="">Seleccione un usuario</option>
+              {usuarios.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.nombre ?? u.usuario} ({u.rol.toLowerCase()})
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="mt-6 flex gap-3">
+            <Boton onClick={reasignar} disabled={!destino}>Guardar asignación</Boton>
+            <Boton variante="texto" onClick={() => setAsignando(null)}>Cancelar</Boton>
+          </div>
+        </Modal>
       )}
     </div>
   );

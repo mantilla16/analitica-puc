@@ -262,6 +262,19 @@ def dueno_de_encargo(encargo_id: str) -> str | None:
     return str(f["creado_por"]) if f and f["creado_por"] else None
 
 
+def reasignar_encargo(encargo_id: str, usuario_id: str, responsable: str) -> dict | None:
+    """Cambia el dueño y el nombre visible del responsable en una sola
+    escritura. `creado_por` es quien puede acceder; `responsable` se conserva
+    como la firma legible que muestran los entregables existentes."""
+    return uno(
+        """UPDATE core.encargo
+              SET creado_por=%s, responsable=%s
+            WHERE id=%s
+          RETURNING id, creado_por, responsable""",
+        (usuario_id, responsable, encargo_id),
+    )
+
+
 def encargo_de_carga(carga_id: str) -> str | None:
     """A qué encargo pertenece una carga. Lo usa la puerta de acceso: hay
     rutas que solo llevan el id de la carga, y sin esto quedarían fuera
