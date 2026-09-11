@@ -125,24 +125,24 @@ export default function Balance({ encargoId }) {
           naturaleza y cuadre. Amplie la ventana para ver el movimiento completo.
         </p>
         <div className="overflow-x-auto">
-        <table className="w-full min-w-[620px] table-fixed text-sm xl:min-w-[1060px]">
+        <table className="w-full min-w-[760px] table-fixed text-sm 2xl:min-w-[1280px]">
           <colgroup>
-            <col className="w-[15%] xl:w-[7%]" />
-            <col className="w-[35%] xl:w-[19%]" />
-            <col className="hidden xl:table-column xl:w-[14%]" />
-            <col className="hidden xl:table-column xl:w-[14%]" />
-            <col className="hidden xl:table-column xl:w-[14%]" />
-            <col className="w-[25%] xl:w-[14%]" />
-            <col className="w-[20%] xl:w-[14%]" />
-            <col className="w-[5%] xl:w-[4%]" />
+            <col className="w-[14%] 2xl:w-[7%]" />
+            <col className="w-[32%] 2xl:w-[19%]" />
+            <col className="hidden 2xl:table-column 2xl:w-[14%]" />
+            <col className="hidden 2xl:table-column 2xl:w-[14%]" />
+            <col className="hidden 2xl:table-column 2xl:w-[14%]" />
+            <col className="w-[24%] 2xl:w-[14%]" />
+            <col className="w-[24%] 2xl:w-[14%]" />
+            <col className="w-[6%] 2xl:w-[4%]" />
           </colgroup>
           <thead className="border-b border-regla bg-papel-hondo">
             <tr className="rotulo text-left">
               <th className="px-3 py-2 font-normal">Código</th>
               <th className="px-3 py-2 font-normal">Cuenta</th>
-              <th className="hidden px-3 py-2 text-right font-normal xl:table-cell">Saldo inicial</th>
-              <th className="hidden px-3 py-2 text-right font-normal xl:table-cell">Débito</th>
-              <th className="hidden px-3 py-2 text-right font-normal xl:table-cell">Crédito</th>
+              <th className="hidden px-3 py-2 text-right font-normal 2xl:table-cell">Saldo inicial</th>
+              <th className="hidden px-3 py-2 text-right font-normal 2xl:table-cell">Débito</th>
+              <th className="hidden px-3 py-2 text-right font-normal 2xl:table-cell">Crédito</th>
               <th className="px-3 py-2 text-right font-normal">Saldo final</th>
               <th className="px-3 py-2 text-right font-normal">Naturaleza</th>
               <th className="px-3 py-2 text-center font-normal">Cuadre</th>
@@ -178,11 +178,11 @@ export default function Balance({ encargoId }) {
                     {f.nombre_cuenta ?? "—"}
                   </button>
                 </td>
-                <td className="hidden cifra px-3 py-2 text-right text-xs xl:table-cell">{monto(f.saldo_inicial)}</td>
-                <td className="hidden cifra px-3 py-2 text-right text-xs xl:table-cell">{monto(f.debito)}</td>
-                <td className="hidden cifra px-3 py-2 text-right text-xs xl:table-cell">{monto(f.credito)}</td>
-                <td className="cifra whitespace-nowrap px-3 py-2 text-right text-xs xl:text-sm">{monto(f.saldo_final)}</td>
-                <td className={`cifra whitespace-nowrap px-3 py-2 text-right text-xs xl:text-sm ${
+                <td className="hidden cifra px-3 py-2 text-right text-xs 2xl:table-cell">{monto(f.saldo_inicial)}</td>
+                <td className="hidden cifra px-3 py-2 text-right text-xs 2xl:table-cell">{monto(f.debito)}</td>
+                <td className="hidden cifra px-3 py-2 text-right text-xs 2xl:table-cell">{monto(f.credito)}</td>
+                <td className="cifra whitespace-nowrap px-3 py-2 text-right text-xs 2xl:text-sm">{monto(f.saldo_final)}</td>
+                <td className={`cifra whitespace-nowrap px-3 py-2 text-right text-xs 2xl:text-sm ${
                   Number(f.saldo_naturaleza) < 0 ? "text-rojo" : ""
                 }`}>
                   {monto(f.saldo_naturaleza)}

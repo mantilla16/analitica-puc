@@ -20,6 +20,17 @@ Una cuenta puede tener una excepcion definida en el catalogo PUC. En ese caso se
 
 Un valor negativo en la columna **Naturaleza** significa que el saldo esta al lado contrario del esperado. Es una senal para revisar, no prueba por si sola de un error: un banco sobregirado o un anticipo a proveedores pueden ser situaciones validas segun los hechos.
 
+### De donde sale el positivo o negativo
+
+El sistema no decide el signo por el nombre de la cuenta ni por si el valor llego positivo o negativo en Excel. Busca primero la naturaleza declarada para el codigo PUC; si no existe, busca la declaracion de su prefijo padre mas cercano; y si tampoco existe, usa la naturaleza de la clase de la tabla anterior.
+
+La regla matematica es: **Naturaleza = saldo final x signo esperado**, donde Debito equivale a `+1` y Credito equivale a `-1`.
+
+- Una cuenta de activo o gasto (Debito) con saldo final positivo queda positiva; con saldo final negativo queda negativa.
+- Una cuenta de pasivo, patrimonio o ingreso (Credito) con saldo final positivo queda negativa; con saldo final negativo queda positiva.
+
+Por ejemplo, una cuenta de proveedores normalmente es Credito. Si el archivo reporta 100.000 positivos, Naturaleza muestra -100.000 y la cuenta se marca para revisar; si reporta -100.000, Naturaleza muestra 100.000 y esta en su lado normal. Esta conversion no modifica el archivo ni el saldo final reportado: solo permite interpretar de manera uniforme el lado contable del saldo.
+
 ### Saldo final frente a Naturaleza
 
 **Saldo final** conserva el signo con el que llego el archivo, porque asi se valida que el balance completo sume cero. **Naturaleza** aplica el signo esperado de la cuenta para interpretar su comportamiento. Si el archivo ya trae pasivos, patrimonio e ingresos negativos, ambas columnas pueden diferir en signo para esas clases, y eso es normal.
