@@ -402,7 +402,7 @@ def construir(p: dict) -> bytes:
     fila = 4
     for et, v, fmt in [
         ("Materialidad de la fase", _num(d.get("umbral")), PESOS),
-        ("Piso de ruido", _num(d.get("trivialidad")), PESOS),
+        ("Error trivial", _num(d.get("trivialidad")), PESOS),
         ("Variación porcentual", _num(d.get("pct_variacion")), PORC),
         ("Cuentas comparadas", d["total_cuentas"], None),
         ("Cuentas seleccionadas", d["significativas"], None),

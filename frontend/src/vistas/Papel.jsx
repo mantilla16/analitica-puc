@@ -450,8 +450,8 @@ export default function Papel({ encargoId, fase }) {
             ? `, variación porcentual desde ${String(d.pct_variacion)}%`
             : ", variación porcentual desactivada"}
           {d.aplica_trivialidad !== false
-            ? `, piso de ruido en ${String(d.pct_trivialidad)}% de la materialidad`
-            : ", sin piso de ruido"}
+            ? `, error trivial del ${String(d.pct_trivialidad)}% de la materialidad`
+            : ", sin error trivial"}
           , más los criterios estructurales de cuenta nueva, cuenta cerrada y
           naturaleza invertida.
         </p>

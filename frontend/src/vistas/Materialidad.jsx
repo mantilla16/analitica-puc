@@ -216,7 +216,7 @@ export default function Materialidad({ encargoId, onCambio }) {
             <label className="flex w-52 items-center gap-2 text-sm">
               <input type="checkbox" checked={param.aplica_trivialidad}
                      onChange={(e) => setParam({ ...param, aplica_trivialidad: e.target.checked })} />
-              Piso de ruido
+              Error trivial
             </label>
             <div className="flex items-center gap-2">
               <input type="number" step="0.01" value={param.pct_trivialidad}
@@ -243,7 +243,7 @@ export default function Materialidad({ encargoId, onCambio }) {
             criterios estructurales.
           </p>
           <p>
-            <strong className="text-tinta-media">Piso de ruido</strong> descarta lo
+            <strong className="text-tinta-media">Error trivial</strong> descarta lo
             pequeño en esos criterios. Sin él, una cuenta que pasa de 2 a 10
             millones entra como “+400%”. Apagarlo vuelve el criterio de porcentaje
             absoluto: cualquier cuenta que cruce el porcentaje se reporta, sin

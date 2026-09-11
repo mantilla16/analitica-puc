@@ -154,7 +154,7 @@ def variaciones(encargo_id: str, fase: str | None = None) -> dict:
     aplica = bool(mat and mat.get("aplicar") and mat.get("valor"))
     umbral = Decimal(mat["valor"]) if aplica else None
 
-    # Los dos criterios se pueden apagar por encargo. Con el piso de ruido
+    # Los dos criterios se pueden apagar por encargo. Con el error trivial
     # apagado vale 0, así que las comparaciones `>= trivial` dejan de
     # filtrar y el criterio de porcentaje queda absoluto: cualquier
     # variación que cruce el porcentaje se reporta, por pequeña que sea.
@@ -272,7 +272,7 @@ def variaciones(encargo_id: str, fase: str | None = None) -> dict:
 
 
 def _desglose_residuo(no_significativas: list[dict], trivial: Decimal) -> dict:
-    """Por qué quedó cada cuenta fuera de la muestra: piso de ruido o
+    """Por qué quedó cada cuenta fuera de la muestra: error trivial o
     variación que no llegó a cruzar el umbral. Es el argumento con datos
     para la nota de alcance, no solo el monto total.
     """

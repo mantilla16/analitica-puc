@@ -122,11 +122,11 @@ def _como_defini_el_alcance(d: dict) -> list[str]:
         criterios.append("el criterio de variación porcentual desactivado por "
                          "decisión del encargo")
     if d.get("aplica_trivialidad", True):
-        criterios.append(f"un piso de ruido en el {d['pct_trivialidad']}% de la "
+        criterios.append(f"un error trivial del {d['pct_trivialidad']}% de la "
                          f"materialidad, {A._cop(d['trivialidad'])}, para no "
                          f"marcar cuentas por cifras irrelevantes")
     else:
-        criterios.append("sin piso de ruido, de modo que cualquier variación "
+        criterios.append("sin error trivial, de modo que cualquier variación "
                          "que cruce el porcentaje se reporta por pequeña que sea")
     criterios.append("y los criterios estructurales de cuenta nueva, cuenta "
                      "cerrada y naturaleza invertida")

@@ -310,7 +310,7 @@ COMMENT ON COLUMN core.encargo.pct_variacion IS 'Variación porcentual que marca
 -- Name: COLUMN encargo.pct_trivialidad; Type: COMMENT; Schema: core; Owner: -
 --
 
-COMMENT ON COLUMN core.encargo.pct_trivialidad IS 'Piso de ruido, como porcentaje de la materialidad de la fase activa';
+COMMENT ON COLUMN core.encargo.pct_trivialidad IS 'Error trivial, como porcentaje de la materialidad de la fase activa';
 
 
 --

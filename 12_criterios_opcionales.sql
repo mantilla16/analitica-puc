@@ -1,10 +1,10 @@
 -- =====================================================================
 -- CRITERIOS DE SELECCIÓN OPCIONALES
 --
--- Hasta ahora el porcentaje de variación y el piso de ruido siempre
+-- Hasta ahora el porcentaje de variación y el error trivial siempre
 -- aplicaban. El auditor necesita poder apagarlos según el encargo:
 --
---   · Sin piso de ruido, el criterio de porcentaje queda "absoluto":
+--   · Sin error trivial, el criterio de porcentaje queda "absoluto":
 --     cualquier cuenta que varíe más del X% se reporta, sin importar
 --     cuán pequeña sea la cifra.
 --   · Sin criterio de porcentaje, la selección se apoya solo en la
@@ -29,7 +29,7 @@ ALTER TABLE core.encargo
 COMMENT ON COLUMN core.encargo.aplica_variacion IS
   'Si el criterio de porcentaje (Comportamiento) participa en la selección.';
 COMMENT ON COLUMN core.encargo.aplica_trivialidad IS
-  'Si el piso de ruido filtra los criterios distintos de Monto.';
+  'Si el error trivial filtra los criterios distintos de Monto.';
 
 COMMIT;
 

@@ -23,7 +23,7 @@ def derivar_materialidad(
     factor_me: Decimal = FACTOR_ME_DEFECTO,
     factor_ctt: Decimal = FACTOR_CTT_DEFECTO,
 ) -> tuple[Decimal, Decimal]:
-    """Materialidad de ejecución y umbral de trivialidad."""
+    """Materialidad de ejecución y error trivial."""
     dos = Decimal("0.01")
     return (
         (mp * factor_me).quantize(dos),

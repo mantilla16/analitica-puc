@@ -37,7 +37,7 @@ ALTER TABLE core.encargo
 COMMENT ON COLUMN core.encargo.pct_variacion IS
   'Variación porcentual que marca una cuenta aunque no supere el umbral en pesos';
 COMMENT ON COLUMN core.encargo.pct_trivialidad IS
-  'Piso de ruido, como porcentaje de la materialidad de la fase activa';
+  'Error trivial, como porcentaje de la materialidad de la fase activa';
 
 
 -- Materialidad: una fila por fase. El valor lo digita el auditor.

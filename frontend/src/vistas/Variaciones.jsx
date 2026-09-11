@@ -4,7 +4,7 @@ import { Aviso, Punteo } from "../comp/Piezas";
 
 /** Convierte el desglose del residuo en el argumento redactado, con las
  * cuentas más grandes del grupo que sí importa (el que no llegó al umbral
- * pero tampoco es ruido). Punto de partida para la nota, no un sustituto
+ * pero tampoco es trivial). Punto de partida para la nota, no un sustituto
  * del juicio del auditor. */
 function resumenAutomatico(d) {
   const g = d?.desglose_no_seleccionado;
@@ -12,7 +12,7 @@ function resumenAutomatico(d) {
   const partes = [
     `De ${monto(d.residuo_no_seleccionado)} en variaciones no seleccionadas, ` +
       `${monto(g.trivial.monto)} (${entero(g.trivial.cuentas)} cuentas) está ` +
-      `por debajo del piso de trivialidad, y ${monto(g.cerca_del_umbral.monto)} ` +
+      `por debajo del error trivial, y ${monto(g.cerca_del_umbral.monto)} ` +
       `(${entero(g.cerca_del_umbral.cuentas)} cuentas) no llegó a cruzar el ` +
       `umbral de variación.`,
   ];
@@ -228,7 +228,7 @@ export default function Variaciones({ encargoId }) {
         </div>
         <div>
           <p className="rotulo">
-            Piso de ruido {d.aplica_trivialidad === false
+            Error trivial {d.aplica_trivialidad === false
               ? "· desactivado"
               : `· ${String(d.pct_trivialidad)}%`}
           </p>
@@ -311,13 +311,13 @@ export default function Variaciones({ encargoId }) {
       {d.desglose_no_seleccionado && (
         <div className="grid grid-cols-1 gap-px bg-regla sm:grid-cols-2">
           <div className="bg-papel-alto p-4">
-            <p className="rotulo">Bajo el piso de trivialidad</p>
+            <p className="rotulo">Bajo el error trivial</p>
             <p className="cifra mt-1 text-lg">
               {monto(d.desglose_no_seleccionado.trivial.monto)}
             </p>
             <p className="text-xs text-tinta-suave">
               {entero(d.desglose_no_seleccionado.trivial.cuentas)} cuentas ·
-              es ruido, no aporta al argumento
+              no aporta al argumento
             </p>
           </div>
           <div className="bg-papel-alto p-4">
