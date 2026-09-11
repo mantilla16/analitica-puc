@@ -71,7 +71,7 @@ export default function Balance({ encargoId }) {
       {/* ------------------------------------------------ tarjetas clase */}
       <div>
         <p className="rotulo mb-3">Por clase · saldo comparable (las clases suman cero)</p>
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(10rem,1fr))] gap-px bg-regla">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(15rem,1fr))] gap-px bg-regla">
           {resumen.map((c) => (
             <button
               key={c.clase}
@@ -79,7 +79,9 @@ export default function Balance({ encargoId }) {
               className="bg-papel-alto px-4 py-4 text-left hover:bg-papel-hondo"
             >
               <p className="rotulo">{c.clase} · {c.clase_nombre}</p>
-              <p className="cifra mt-2 text-base">{monto(c.saldo)}</p>
+              <p className="cifra mt-2 truncate text-base" title={monto(c.saldo)}>
+                {monto(c.saldo)}
+              </p>
               <p className="mt-1 text-xs text-tinta-suave">
                 {entero(c.cuentas)} cuentas
               </p>
@@ -119,28 +121,28 @@ export default function Balance({ encargoId }) {
       {/* ------------------------------------------------------ tabla */}
       <div className="panel">
         <p className="border-b border-regla bg-papel-hondo px-3 py-2 text-xs text-tinta-suave">
-          Deslice horizontalmente para ver todas las columnas. Las cifras se
-          mantienen en una tabla ancha para que no se monten ni se corten.
+          En pantallas compactas se muestran las cifras clave: saldo final,
+          naturaleza y cuadre. Amplie la ventana para ver el movimiento completo.
         </p>
         <div className="overflow-x-auto">
-        <table className="w-full min-w-[1060px] table-fixed text-sm">
+        <table className="w-full min-w-[620px] table-fixed text-sm xl:min-w-[1060px]">
           <colgroup>
-            <col className="w-[7%]" />
-            <col className="w-[19%]" />
-            <col className="w-[14%]" />
-            <col className="w-[14%]" />
-            <col className="w-[14%]" />
-            <col className="w-[14%]" />
-            <col className="w-[14%]" />
-            <col className="w-[4%]" />
+            <col className="w-[15%] xl:w-[7%]" />
+            <col className="w-[35%] xl:w-[19%]" />
+            <col className="hidden xl:table-column xl:w-[14%]" />
+            <col className="hidden xl:table-column xl:w-[14%]" />
+            <col className="hidden xl:table-column xl:w-[14%]" />
+            <col className="w-[25%] xl:w-[14%]" />
+            <col className="w-[20%] xl:w-[14%]" />
+            <col className="w-[5%] xl:w-[4%]" />
           </colgroup>
           <thead className="border-b border-regla bg-papel-hondo">
             <tr className="rotulo text-left">
               <th className="px-3 py-2 font-normal">Código</th>
               <th className="px-3 py-2 font-normal">Cuenta</th>
-              <th className="px-3 py-2 text-right font-normal">Saldo inicial</th>
-              <th className="px-3 py-2 text-right font-normal">Débito</th>
-              <th className="px-3 py-2 text-right font-normal">Crédito</th>
+              <th className="hidden px-3 py-2 text-right font-normal xl:table-cell">Saldo inicial</th>
+              <th className="hidden px-3 py-2 text-right font-normal xl:table-cell">Débito</th>
+              <th className="hidden px-3 py-2 text-right font-normal xl:table-cell">Crédito</th>
               <th className="px-3 py-2 text-right font-normal">Saldo final</th>
               <th className="px-3 py-2 text-right font-normal">Naturaleza</th>
               <th className="px-3 py-2 text-center font-normal">Cuadre</th>
@@ -156,7 +158,7 @@ export default function Balance({ encargoId }) {
             )}
             {filas.map((f) => (
               <tr key={f.codigo_puc} className="border-b border-regla-fina hover:bg-papel-hondo">
-                <td className="px-3 py-2">
+                <td className="whitespace-nowrap px-3 py-2">
                   {f.tiene_hijos ? (
                     <button
                       onClick={() => { setBuscar(""); setRuta([...ruta, f.codigo_puc]); }}
@@ -168,7 +170,7 @@ export default function Balance({ encargoId }) {
                     <span className="cifra">{f.codigo_puc}</span>
                   )}
                 </td>
-                <td className="px-3 py-2">
+                <td className="truncate px-3 py-2" title={f.nombre_cuenta ?? "-"}>
                   <button
                     onClick={() => api.detalleCuenta(encargoId, f.codigo_puc).then(setDetalle)}
                     className="text-left hover:underline"
@@ -176,11 +178,11 @@ export default function Balance({ encargoId }) {
                     {f.nombre_cuenta ?? "—"}
                   </button>
                 </td>
-                <td className="cifra px-3 py-2 text-right text-xs">{monto(f.saldo_inicial)}</td>
-                <td className="cifra px-3 py-2 text-right text-xs">{monto(f.debito)}</td>
-                <td className="cifra px-3 py-2 text-right text-xs">{monto(f.credito)}</td>
-                <td className="cifra px-3 py-2 text-right">{monto(f.saldo_final)}</td>
-                <td className={`cifra px-3 py-2 text-right ${
+                <td className="hidden cifra px-3 py-2 text-right text-xs xl:table-cell">{monto(f.saldo_inicial)}</td>
+                <td className="hidden cifra px-3 py-2 text-right text-xs xl:table-cell">{monto(f.debito)}</td>
+                <td className="hidden cifra px-3 py-2 text-right text-xs xl:table-cell">{monto(f.credito)}</td>
+                <td className="cifra whitespace-nowrap px-3 py-2 text-right text-xs xl:text-sm">{monto(f.saldo_final)}</td>
+                <td className={`cifra whitespace-nowrap px-3 py-2 text-right text-xs xl:text-sm ${
                   Number(f.saldo_naturaleza) < 0 ? "text-rojo" : ""
                 }`}>
                   {monto(f.saldo_naturaleza)}
