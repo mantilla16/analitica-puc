@@ -33,3 +33,9 @@ frontend/files.zip
 # que autorizó, así que no va al repositorio ni siquiera siendo privado.
 correo_token.json
 correo_token.json.nuevo
+
+# Insumos reales traídos a mano para probar un ERP nuevo. Son estados
+# financieros de clientes: no van al repositorio ni siquiera siendo privado.
+/Analisis */
+/output/
+/tmp/

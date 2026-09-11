@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from openpyxl import load_workbook
+from openpyxl.utils import get_column_letter
 
 MAX_FILAS_ESCANEO = 30
 MIN_CELDAS_ENCABEZADO = 4
@@ -185,21 +186,46 @@ def _es_fila_datos(fila: tuple) -> bool:
     return bool(s) and s.isdigit()
 
 
-# Textos que en filas adicionales se interpretan como encabezados de columna
-# (no como datos de cuentas). Se usa para fusionar encabezados multi-fila
-# cuando el ERP (p. ej. SIESA 2025) pone "Descripción" debajo de "Cuentas"
-# en la misma columna.
-ENCABEZADOS_FILAS_ADICIONALES = {"descripcion"}
+def _columnas_con_datos(ws, desde: int, filas: int = 15) -> set[int]:
+    """Qué columnas traen algo debajo del encabezado.
+
+    Es la única forma honesta de saber que una columna existe cuando el
+    archivo no la rotula: se mira el dato, no el título.
+    """
+    vistas: set[int] = set()
+    for fila in _filas(ws, min_row=desde, max_row=desde + filas - 1):
+        for j, v in enumerate(fila or ()):
+            if v is not None and str(v).strip():
+                vistas.add(j)
+    return vistas
 
 
 def _detectar_encabezado(ws) -> tuple[int | None, list[dict]]:
     """Fila con más celdas de texto: es el encabezado. Devuelve (fila, columnas).
 
-    Cuando los encabezados están repartidos en varias filas contiguas (p. ej.
-    SIESA pone "Cuentas" en la fila 12 y "Descripción" en la fila 13 porque
-    la celda B12 está vacía o porque está en la misma columna pero en otra
-    fila), se fusionan: se buscan encabezados adicionales en filas entre la
-    principal y la primera fila de datos.
+    Dos cosas que ningún archivo real respeta y hay que absorber aquí:
+
+    · Los encabezados pueden estar repartidos en varias filas. Si en las
+      filas siguientes aparece un texto sobre una columna que la fila
+      principal dejó vacía, es el rótulo de esa columna y se agrega.
+
+    · Puede haber columnas CON DATOS y SIN rótulo. El balance de SIESA pone
+      el nombre de la cuenta en la columna B y escribe "Descripción" en la
+      celda A13, indentada con espacios para que visualmente quede encima
+      de B. Para quien lee el Excel se ve bien; para quien lo parsea, la
+      columna B no tiene encabezado y desaparece del mapeo -- que fue
+      exactamente lo que pasó: el nombre de la cuenta salía vacío.
+
+      Esas columnas se ofrecen igual, nombradas por su letra ("Columna B").
+      El nombre es estable entre cargas, que es lo que necesita el perfil
+      guardado; adivinar el rótulo a partir de un texto suelto habría dado
+      un nombre que cambia con el archivo.
+
+    Lo que NO se hace: inventar índices. Antes, un rótulo que caía sobre una
+    columna ya ocupada recibía un índice sintético negativo, y en Python
+    `fila[-1]` no es "columna inexistente" sino la ÚLTIMA columna. Aquí
+    devolvía None por casualidad; en otro archivo habría leído cifras de
+    otra columna sin que nada lo advirtiera.
     """
     mejor_fila, mejor_puntaje, mejor_celdas = None, 0, []
 
@@ -217,45 +243,33 @@ def _detectar_encabezado(ws) -> tuple[int | None, list[dict]]:
     if mejor_fila is None:
         return None, []
 
-    # --- fusión multi-fila: buscar encabezados adicionales ---------------
-    # Se busca entre la fila principal y la primera fila de datos (o un
-    # máximo de MAX_FILAS_BUSQUEDA_ADICIONAL filas).
-    #
-    # Caso A (SIESA 2026): "Descripción" está en una columna vacía de la
-    #   fila principal → se añade directamente.
-    # Caso B (SIESA 2025): "Descripción" está en la MISMA columna que
-    #   "Cuentas" → se detecta como encabezado adicional y se añade con un
-    #   índice sintético para que el mapeo lo ubique.
+    # --- rótulos repartidos en filas siguientes --------------------------
     ocupadas = {c["indice"] for c in mejor_celdas}
-    limite = mejor_fila + MAX_FILAS_BUSQUEDA_ADICIONAL
-    for num_fila, fila in enumerate(
-        _filas(ws, min_row=mejor_fila + 1, max_row=limite),
+    primera_dato = mejor_fila + 1
+    for num, fila in enumerate(
+        _filas(ws, min_row=mejor_fila + 1,
+               max_row=mejor_fila + MAX_FILAS_BUSQUEDA_ADICIONAL),
         start=mejor_fila + 1,
     ):
-        if not fila:
-            continue
-        if _es_fila_datos(fila):
+        if fila and _es_fila_datos(fila):
+            primera_dato = num
             break
-        for j, v in enumerate(fila):
-            if v is not None and isinstance(v, str) and v.strip():
-                texto_norm = norm(v)
-                if j not in ocupadas:
-                    # caso A: columna vacía en la fila principal
-                    mejor_celdas.append({"indice": j, "texto": str(v).strip()})
-                    ocupadas.add(j)
-                elif texto_norm in ENCABEZADOS_FILAS_ADICIONALES:
-                    # caso B: misma columna pero es un encabezado conocido
-                    # Se usa índice sintético negativo para distinguirlo del
-                    # encabezado primario en la misma posición.
-                    idx_sintetico = -j - 1
-                    mejor_celdas.append({
-                        "indice": idx_sintetico,
-                        "texto": str(v).strip(),
-                    })
+        primera_dato = num + 1
+        for j, v in enumerate(fila or ()):
+            if (v is not None and isinstance(v, str) and v.strip()
+                    and j not in ocupadas):
+                mejor_celdas.append({"indice": j, "texto": str(v).strip()})
+                ocupadas.add(j)
 
-    # reordenar: primarios por índice, luego sintéticos
-    mejor_celdas.sort(key=lambda c: (c["indice"] < 0, c["indice"]))
+    # --- columnas con datos que nadie rotuló ------------------------------
+    for j in sorted(_columnas_con_datos(ws, primera_dato) - ocupadas):
+        mejor_celdas.append({
+            "indice": j,
+            "texto": f"Columna {get_column_letter(j + 1)}",
+            "sin_encabezado": True,
+        })
 
+    mejor_celdas.sort(key=lambda c: c["indice"])
     return mejor_fila, mejor_celdas
 
 
@@ -336,14 +350,7 @@ def inspeccionar(
 # ----------------------------------------------------------------- parseo
 
 def _indices(columnas_perfil: dict[str, str], celdas: list[dict]) -> dict[str, int]:
-    """campo canónico -> índice real de columna EN ESTE archivo.
-
-    Soporta índices sintéticos (negativos) generados por la fusión multi-fila.
-    Un índice negativo -j-1 significa que el encabezado está en la columna j
-    pero en una fila adicional (p. ej. "Descripción" debajo de "Cuentas" en
-    la misma columna). Se resuelve mapeando el campo al índice j y marcando
-    que el valor viene de una fila auxiliar.
-    """
+    """campo canónico -> índice real de columna EN ESTE archivo."""
     por_norma = {norm(c["texto"]): c["indice"] for c in celdas}
     faltantes, idx = [], {}
     for campo, encabezado in columnas_perfil.items():
