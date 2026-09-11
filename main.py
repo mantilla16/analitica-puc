@@ -30,6 +30,7 @@ import servicios as S
 import analisis as A
 import papel as P
 import papel_excel as PX
+import reglas as R
 
 ALMACEN = Path("./archivos")
 ALMACEN.mkdir(exist_ok=True)
@@ -84,6 +85,7 @@ ACCIONES = [
     ("POST",   r"^/auth/logout$",                     "SALIDA",               "usuario"),
     ("POST",   r"^/encargos$",                        "ENCARGO_CREADO",       "encargo"),
     ("PUT",    r"^/encargos/[^/]+/responsable$",      "ENCARGO_REASIGNADO",   "encargo"),
+    ("PUT",    r"^/encargos/[^/]+$",                  "ENCARGO_EDITADO",      "encargo"),
     ("DELETE", r"^/encargos/[^/]+$",                  "ENCARGO_BORRADO",      "encargo"),
     ("POST",   r"^/encargos/[^/]+/cargas$",           "ARCHIVO_SUBIDO",       "carga"),
     ("POST",   r"^/cargas/[^/]+/mapeo$",              "MAPEO_CONFIRMADO",     "carga"),
@@ -528,6 +530,21 @@ class ReasignarEncargo(BaseModel):
     usuario_id: str
 
 
+class EncargoCambio(BaseModel):
+    """Lo editable de la ficha. Todo opcional: se cambia solo lo que venga.
+
+    `confirmar` es la respuesta del auditor a la advertencia de que mover
+    las fechas deja archivos ya cargados apuntando a otro corte. Sin ella,
+    ese cambio se rechaza en vez de aplicarse en silencio.
+    """
+    razon_social: str | None = None
+    fecha_corte: date | None = None
+    fecha_cierre_anterior: date | None = None
+    fecha_corte_anterior: date | None = None
+    estado: str | None = None
+    confirmar: bool = False
+
+
 class MaterialidadEntrada(BaseModel):
     valor: Decimal | None = None
     porcentaje: Decimal | None = None
@@ -629,6 +646,90 @@ def reasignar_encargo(encargo_id: str, d: ReasignarEncargo,
         "destino_id": str(destino["id"]),
     }
     return {**(r or {}), "creado_por_nombre": destino["nombre"]}
+
+
+@app.put("/encargos/{encargo_id}")
+def editar_encargo(encargo_id: str, c: EncargoCambio, request: Request) -> dict:
+    """Edita la ficha del encargo. Solo un administrador.
+
+    Lo delicado son las fechas. Cambiar el corte mueve los dos periodos
+    comparativos, pero los archivos ya subidos conservan el periodo con el
+    que entraron: el papel diria "corte a 30/06" sobre un balance de mayo,
+    y saldria coherente, firmable y equivocado. Por eso el cambio se
+    rechaza con la lista de lo que quedaria desalineado, y solo se aplica
+    si el auditor lo confirma habiendola visto.
+
+    Cuando se confirma NO se finge que todo esta bien: cada insumo
+    desalineado queda como hallazgo BLOQUEANTE, para que el papel no se
+    arme como si nada hasta que se vuelvan a subir los archivos.
+    """
+    _exigir_admin(request)
+    enc = db.encargo(encargo_id)
+    if not enc:
+        raise HTTPException(404, "Encargo no existe")
+
+    if c.estado is not None and c.estado not in ("ABIERTO", "CERRADO"):
+        raise HTTPException(422, "Estado debe ser ABIERTO o CERRADO")
+
+    campos = {k: v for k, v in
+              (("fecha_corte", c.fecha_corte),
+               ("fecha_cierre_anterior", c.fecha_cierre_anterior),
+               ("fecha_corte_anterior", c.fecha_corte_anterior),
+               ("estado", c.estado))
+              if v is not None and v != enc[k]}
+
+    razon = (c.razon_social or "").strip()
+    cambia_razon = bool(razon) and razon != enc["razon_social"]
+    if not campos and not cambia_razon:
+        return {**enc, "sin_cambios": True}
+
+    fechas = {k: campos.get(k, enc[k]) for k in
+              ("fecha_corte", "fecha_cierre_anterior", "fecha_corte_anterior")}
+    if fechas["fecha_cierre_anterior"] >= fechas["fecha_corte"]:
+        raise HTTPException(422, "El cierre anterior debe ser previo al corte")
+    if fechas["fecha_corte_anterior"] >= fechas["fecha_corte"]:
+        raise HTTPException(
+            422, "El corte del año anterior debe ser previo al corte")
+
+    # Solo se comprueba si ALGUNA fecha cambio. Un insumo que ya estuviera
+    # desalineado de antes no puede bloquear un cambio de estado o de razon
+    # social: seria un "no" a algo que no rompe nada.
+    mueve_fechas = any(k.startswith("fecha_") for k in campos)
+    malos = (R.desalineados(db.insumos_con_periodo(encargo_id), fechas)
+             if mueve_fechas else [])
+    if malos and not c.confirmar:
+        raise HTTPException(409, {
+            "problema": "Hay archivos cargados que dejarían de corresponder "
+                        "a este encargo",
+            "desalineados": [
+                {**m, "tenia": str(m["tenia"]), "deberia": str(m["deberia"])}
+                for m in malos],
+        })
+
+    if cambia_razon:
+        db.actualizar_cliente(str(enc["cliente_id"]), razon)
+    if campos:
+        db.actualizar_encargo(encargo_id, **campos)
+
+    for m in malos:
+        db.crear_hallazgo(
+            encargo_id=encargo_id, tipo="PERIODO_CAMBIADO",
+            severidad="BLOQUEANTE",
+            descripcion=(
+                f"Se cambiaron las fechas del encargo y el archivo de "
+                f"{m['tipo']} quedó con periodo al {m['tenia']}, cuando "
+                f"ahora debería cerrar al {m['deberia']}. Vuelva a subirlo: "
+                f"hasta entonces el papel estaría comparando periodos que no "
+                f"corresponden."),
+        )
+
+    request.state.bitacora = {
+        "razon_social": razon or enc["razon_social"],
+        "cambios": {k: str(v) for k, v in campos.items()},
+        "razon_social_cambiada": cambia_razon,
+        "desalineados": [m["tipo"] for m in malos],
+    }
+    return {**db.encargo(encargo_id), "desalineados": [m["tipo"] for m in malos]}
 
 
 @app.delete("/encargos/{encargo_id}")

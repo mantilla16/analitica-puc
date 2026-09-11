@@ -275,6 +275,36 @@ def reasignar_encargo(encargo_id: str, usuario_id: str, responsable: str) -> dic
     )
 
 
+def actualizar_encargo(encargo_id: str, **campos: Any) -> dict | None:
+    """Edición de la ficha del encargo. Devuelve la fila completa."""
+    if not campos:
+        return encargo(encargo_id)
+    sets = ", ".join(f"{k}=%s" for k in campos)
+    return uno(f"UPDATE core.encargo SET {sets} WHERE id=%s RETURNING *",
+               (*campos.values(), encargo_id))
+
+
+def actualizar_cliente(cliente_id: str, razon_social: str) -> None:
+    ejecutar("UPDATE core.cliente SET razon_social=%s WHERE id=%s",
+             (razon_social, cliente_id))
+
+
+def insumos_con_periodo(encargo_id: str) -> list[dict]:
+    """Los insumos ya cargados con el periodo que traen. Es contra esto que
+    se comprueba si mover las fechas del encargo dejaria algun archivo
+    apuntando a otro corte."""
+    return varios(
+        """SELECT ei.tipo, c.periodo_ini, c.periodo_fin, c.archivo,
+                  i.nombre AS insumo
+             FROM core.encargo_insumo ei
+             JOIN core.carga c ON c.id = ei.carga_id
+             JOIN core.insumo i ON i.tipo = ei.tipo
+            WHERE ei.encargo_id = %s
+            ORDER BY i.orden""",
+        (encargo_id,),
+    )
+
+
 def encargo_de_carga(carga_id: str) -> str | None:
     """A qué encargo pertenece una carga. Lo usa la puerta de acceso: hay
     rutas que solo llevan el id de la carga, y sin esto quedarían fuera

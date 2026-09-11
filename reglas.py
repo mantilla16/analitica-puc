@@ -47,6 +47,45 @@ def derivar_fechas_encargo(fecha_corte: date) -> tuple[date, date]:
     return cierre, corte
 
 
+# A qué fecha del encargo debe corresponder el cierre de cada insumo. Es
+# la mitad de la derivación del periodo -- solo el final -- y con eso basta
+# para saber si un archivo ya cargado dejó de corresponder al encargo.
+FECHA_DEL_INSUMO = {
+    "BAL_ACTUAL":          "fecha_corte",
+    "MOV_ACTUAL":          "fecha_corte",
+    "PRECOMPROBANTE":      "fecha_corte",
+    "BAL_CIERRE_ANTERIOR": "fecha_cierre_anterior",
+    "MOV_ANTERIOR":        "fecha_cierre_anterior",
+    "BAL_CORTE_ANTERIOR":  "fecha_corte_anterior",
+}
+
+
+def desalineados(insumos, fechas: dict) -> list[dict]:
+    """Qué insumos ya cargados dejarían de corresponder con estas fechas.
+
+    Cambiar la fecha de corte de un encargo mueve los dos periodos
+    comparativos, pero los archivos ya subidos conservan el periodo con el
+    que entraron. Sin esta comprobación, el papel diría "corte a 30/06" sobre
+    un balance de mayo: coherente, firmable y equivocado.
+
+    Se compara solo el cierre del periodo porque es lo que identifica al
+    insumo; el inicio se deriva de él.
+
+    `insumos` son filas con `tipo` y `periodo_fin`; `fechas` es el encargo ya
+    con los valores nuevos.
+    """
+    malos = []
+    for i in insumos:
+        campo = FECHA_DEL_INSUMO.get(i["tipo"])
+        if not campo or i.get("periodo_fin") is None:
+            continue
+        esperada = fechas.get(campo)
+        if esperada is not None and i["periodo_fin"] != esperada:
+            malos.append({"tipo": i["tipo"], "tenia": i["periodo_fin"],
+                          "deberia": esperada, "campo": campo})
+    return malos
+
+
 def inicio_periodo_auditado(fecha_corte: date) -> date:
     """Todo movimiento anterior a esta fecha está en periodo ya cerrado."""
     return date(fecha_corte.year, 1, 1)

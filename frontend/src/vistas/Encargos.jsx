@@ -7,9 +7,10 @@ export default function Encargos({ yo, onAbrir }) {
   const [creando, setCreando] = useState(false);
   const [error, setError] = useState(null);
   const [borrando, setBorrando] = useState(null);   // encargo por confirmar
-  const [asignando, setAsignando] = useState(null);
   const [usuarios, setUsuarios] = useState([]);
-  const [destino, setDestino] = useState("");
+  const [editando, setEditando] = useState(null);   // encargo en edición
+  const [ed, setEd] = useState(null);               // sus campos
+  const [choque, setChoque] = useState(null);       // insumos desalineados
   const [form, setForm] = useState({
     nit: "", razon_social: "", fecha_corte: "",
   });
@@ -46,20 +47,62 @@ export default function Encargos({ yo, onAbrir }) {
     }
   }
 
-  function abrirAsignacion(enc) {
-    setAsignando(enc);
-    setDestino(enc.creado_por ?? "");
+  function abrirEdicion(enc) {
+    setEditando(enc);
+    setChoque(null);
+    setEd({
+      razon_social: enc.razon_social ?? "",
+      responsable: enc.creado_por ?? "",
+      estado: enc.estado ?? "ABIERTO",
+      fecha_corte: enc.fecha_corte ?? "",
+      fecha_cierre_anterior: enc.fecha_cierre_anterior ?? "",
+      fecha_corte_anterior: enc.fecha_corte_anterior ?? "",
+    });
   }
 
-  async function reasignar() {
-    if (!asignando || !destino) return;
+  /* Al mover el corte se recalculan las dos fechas comparativas, que es lo
+     que el sistema haría al crear el encargo. Quedan editables: hay cierres
+     que no caen el 31 de diciembre. */
+  function cambiarCorte(valor) {
+    const d = new Date(`${valor}T00:00:00`);
+    if (isNaN(d)) return setEd({ ...ed, fecha_corte: valor });
+    const a = d.getFullYear() - 1;
+    const mes = String(d.getMonth() + 1).padStart(2, "0");
+    const dia = String(d.getDate()).padStart(2, "0");
+    setEd({
+      ...ed,
+      fecha_corte: valor,
+      fecha_cierre_anterior: `${a}-12-31`,
+      fecha_corte_anterior: `${a}-${mes}-${dia}`,
+    });
+  }
+
+  async function guardarEdicion(confirmar = false) {
+    if (!editando) return;
     setError(null);
     try {
-      await api.reasignarEncargo(asignando.id, destino);
-      setAsignando(null);
+      // El responsable va por su propia ruta: cambia quién tiene acceso, no
+      // solo un dato de la ficha, y queda en la bitácora como tal.
+      if (ed.responsable && ed.responsable !== editando.creado_por) {
+        await api.reasignarEncargo(editando.id, ed.responsable);
+      }
+      await api.editarEncargo(editando.id, {
+        razon_social: ed.razon_social,
+        estado: ed.estado,
+        fecha_corte: ed.fecha_corte,
+        fecha_cierre_anterior: ed.fecha_cierre_anterior,
+        fecha_corte_anterior: ed.fecha_corte_anterior,
+        confirmar,
+      });
+      setEditando(null);
+      setChoque(null);
       refrescar();
     } catch (err) {
-      setError(err.message);
+      if (err.estado === 409 && err.detalle?.desalineados) {
+        setChoque(err.detalle);      // no se guarda: primero que lo vea
+      } else {
+        setError(err.detalle?.problema ?? err.message);
+      }
     }
   }
 
@@ -124,11 +167,11 @@ export default function Encargos({ yo, onAbrir }) {
                   </button>
                   {yo?.rol === "ADMIN" && (
                     <button
-                      onClick={(ev) => { ev.stopPropagation(); abrirAsignacion(e); }}
+                      onClick={(ev) => { ev.stopPropagation(); abrirEdicion(e); }}
                       className="rotulo shrink-0 text-tinta-suave hover:text-marca"
-                      title="Cambiar el responsable del encargo"
+                      title="Editar la ficha del encargo"
                     >
-                      Asignar
+                      Editar
                     </button>
                   )}
                   <button
@@ -215,31 +258,122 @@ export default function Encargos({ yo, onAbrir }) {
         </Confirmar>
       )}
 
-      {asignando && (
-        <Modal titulo={`Asignar ${asignando.razon_social}`} rotulo="Administrador"
-               onCerrar={() => setAsignando(null)}>
-          <p className="text-sm leading-relaxed text-tinta-media">
-            El usuario elegido verá este encargo y pasará a figurar como su
-            responsable. El cambio queda registrado en la bitácora.
-          </p>
-          <label className="mt-5 block">
-            <span className="rotulo">Responsable</span>
-            <select value={destino} onChange={(e) => setDestino(e.target.value)}
-                    className="mt-1.5 w-full px-3 py-2 text-sm">
-              <option value="">Seleccione un usuario</option>
-              {usuarios.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.nombre ?? u.usuario} ({u.rol.toLowerCase()})
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="mt-6 flex gap-3">
-            <Boton onClick={reasignar} disabled={!destino}>Guardar asignación</Boton>
-            <Boton variante="texto" onClick={() => setAsignando(null)}>Cancelar</Boton>
+      {editando && ed && (
+        <Modal titulo="Editar encargo" rotulo={editando.nit}
+               ancho="max-w-lg" onCerrar={() => { setEditando(null); setChoque(null); }}>
+
+          {/* La advertencia va ANTES del formulario y no se puede pasar por
+              alto: es la única pantalla donde un cambio puede dejar el papel
+              comparando periodos que no corresponden. */}
+          {choque && (
+            <div className="mb-5">
+              <Aviso tono="error" titulo="Hay archivos que dejarían de corresponder">
+                <p>
+                  Estas fechas no coinciden con el periodo de los archivos ya
+                  cargados:
+                </p>
+                <ul className="mt-2 space-y-1">
+                  {choque.desalineados.map((d) => (
+                    <li key={d.tipo} className="text-xs">
+                      <span className="cifra">{d.tipo}</span> cierra al{" "}
+                      <span className="cifra">{d.tenia}</span> y debería cerrar
+                      al <span className="cifra">{d.deberia}</span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-2">
+                  Si continúa, esos insumos quedan marcados como bloqueantes y
+                  hay que volver a subirlos. El papel no se arma mientras tanto.
+                </p>
+              </Aviso>
+            </div>
+          )}
+
+          <div className="space-y-4">
+            <label className="block">
+              <span className="rotulo">Razón social</span>
+              <input value={ed.razon_social}
+                     onChange={(e) => setEd({ ...ed, razon_social: e.target.value })}
+                     className="mt-1.5 w-full px-3 py-2 text-sm" />
+              <span className="mt-1 block text-xs text-tinta-suave">
+                Es del cliente: cambia en todos sus encargos.
+              </span>
+            </label>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="block">
+                <span className="rotulo">Responsable</span>
+                <select value={ed.responsable}
+                        onChange={(e) => setEd({ ...ed, responsable: e.target.value })}
+                        className="mt-1.5 w-full px-3 py-2 text-sm">
+                  <option value="">Sin asignar</option>
+                  {usuarios.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.nombre ?? u.usuario} ({u.rol.toLowerCase()})
+                    </option>
+                  ))}
+                </select>
+                <span className="mt-1 block text-xs text-tinta-suave">
+                  Es quien lo ve y quien firma el papel.
+                </span>
+              </label>
+              <label className="block">
+                <span className="rotulo">Estado</span>
+                <select value={ed.estado}
+                        onChange={(e) => setEd({ ...ed, estado: e.target.value })}
+                        className="mt-1.5 w-full px-3 py-2 text-sm">
+                  <option value="ABIERTO">Abierto</option>
+                  <option value="CERRADO">Cerrado</option>
+                </select>
+              </label>
+            </div>
+
+            <label className="block">
+              <span className="rotulo">Fecha de corte</span>
+              <input type="date" value={ed.fecha_corte}
+                     onChange={(e) => cambiarCorte(e.target.value)}
+                     className="cifra mt-1.5 w-full px-3 py-2 text-sm" />
+              <span className="mt-1 block text-xs text-tinta-suave">
+                Al cambiarla se recalculan las dos comparativas de abajo.
+              </span>
+            </label>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="block">
+                <span className="rotulo">Clases 1·2·3 contra</span>
+                <input type="date" value={ed.fecha_cierre_anterior}
+                       onChange={(e) => setEd({ ...ed, fecha_cierre_anterior: e.target.value })}
+                       className="cifra mt-1.5 w-full px-3 py-2 text-sm" />
+              </label>
+              <label className="block">
+                <span className="rotulo">Clases 4·5·6·7 contra</span>
+                <input type="date" value={ed.fecha_corte_anterior}
+                       onChange={(e) => setEd({ ...ed, fecha_corte_anterior: e.target.value })}
+                       className="cifra mt-1.5 w-full px-3 py-2 text-sm" />
+              </label>
+            </div>
+          </div>
+
+          <div className="mt-6 flex flex-wrap gap-3">
+            {choque ? (
+              <button onClick={() => guardarEdicion(true)}
+                      className="btn bg-rojo text-papel-alto hover:bg-rojo-vivo">
+                Entiendo, cambiar de todos modos
+              </button>
+            ) : (
+              <Boton onClick={() => guardarEdicion(false)}
+                     disabled={!ed.razon_social.trim() || !ed.fecha_corte}>
+                Guardar
+              </Boton>
+            )}
+            <Boton variante="texto"
+                   onClick={() => { setEditando(null); setChoque(null); }}>
+              Cancelar
+            </Boton>
           </div>
         </Modal>
       )}
+
     </div>
   );
 }
