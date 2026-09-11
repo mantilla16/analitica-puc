@@ -71,7 +71,7 @@ export default function Balance({ encargoId }) {
       {/* ------------------------------------------------ tarjetas clase */}
       <div>
         <p className="rotulo mb-3">Por clase · saldo comparable (las clases suman cero)</p>
-        <div className="grid grid-cols-2 gap-px bg-regla sm:grid-cols-3 lg:grid-cols-6">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(10rem,1fr))] gap-px bg-regla">
           {resumen.map((c) => (
             <button
               key={c.clase}
@@ -117,8 +117,23 @@ export default function Balance({ encargoId }) {
       </div>
 
       {/* ------------------------------------------------------ tabla */}
-      <div className="overflow-x-auto panel">
-        <table className="w-full text-sm">
+      <div className="panel">
+        <p className="border-b border-regla bg-papel-hondo px-3 py-2 text-xs text-tinta-suave">
+          Deslice horizontalmente para ver todas las columnas. Las cifras se
+          mantienen en una tabla ancha para que no se monten ni se corten.
+        </p>
+        <div className="overflow-x-auto">
+        <table className="w-full min-w-[1060px] table-fixed text-sm">
+          <colgroup>
+            <col className="w-[7%]" />
+            <col className="w-[19%]" />
+            <col className="w-[14%]" />
+            <col className="w-[14%]" />
+            <col className="w-[14%]" />
+            <col className="w-[14%]" />
+            <col className="w-[14%]" />
+            <col className="w-[4%]" />
+          </colgroup>
           <thead className="border-b border-regla bg-papel-hondo">
             <tr className="rotulo text-left">
               <th className="px-3 py-2 font-normal">Código</th>
@@ -186,6 +201,7 @@ export default function Balance({ encargoId }) {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
 
       <p className="text-xs text-tinta-suave">

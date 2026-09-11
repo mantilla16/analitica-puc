@@ -271,6 +271,26 @@ export default function Variaciones({ encargoId }) {
         ))}
       </div>
 
+      <details className="panel px-4 py-3 text-sm text-tinta-media">
+        <summary className="cursor-pointer font-semibold text-tinta">
+          Qué significa cada filtro
+        </summary>
+        <div className="mt-3 grid gap-x-8 gap-y-2 text-xs leading-relaxed sm:grid-cols-2">
+          <p><strong className="text-tinta">Para revisar:</strong> todas las
+          cuentas seleccionadas por alguno de los criterios siguientes.</p>
+          <p><strong className="text-tinta">Monto:</strong> la variación absoluta
+          alcanza o supera la materialidad de ejecución de la fase.</p>
+          <p><strong className="text-tinta">Comportamiento:</strong> supera el
+          porcentaje configurado y no es una variación trivial.</p>
+          <p><strong className="text-tinta">Nuevas / Cerradas:</strong> pasan de
+          cero a un saldo no trivial, o de un saldo no trivial a cero.</p>
+          <p><strong className="text-tinta">Naturaleza:</strong> el saldo queda
+          contrario a su comportamiento contable esperado y no es trivial.</p>
+          <p><strong className="text-tinta">Todas:</strong> muestra el universo
+          completo, incluidas las cuentas que no entraron al alcance.</p>
+        </div>
+      </details>
+
       {/* ---------------------------------------------- control de alcance */}
       {d.residuo_supera_umbral ? (
         <Aviso tono="alerta" titulo="El alcance puede quedar corto">
