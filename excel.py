@@ -15,6 +15,7 @@ import hashlib
 import re
 import unicodedata
 from datetime import date, datetime
+from collections import Counter
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Iterator
@@ -260,6 +261,24 @@ def _detectar_encabezado(ws) -> tuple[int | None, list[dict]]:
                     and j not in ocupadas):
                 mejor_celdas.append({"indice": j, "texto": str(v).strip()})
                 ocupadas.add(j)
+
+    # --- rotulos repetidos ------------------------------------------------
+    # Un mismo texto en dos columnas distintas no se puede mapear: el perfil
+    # guarda el TEXTO del encabezado, y dos columnas que se llaman igual son
+    # indistinguibles. Peor todavia, `_indices` las mete en un diccionario y
+    # gana la ultima -- en silencio. El balance de KAIAK tiene dos columnas
+    # "CUENTA" (el grupo de dos digitos y el codigo completo) y funcionaba de
+    # casualidad: si el orden fuera el inverso habria cargado codigos
+    # truncados sin que nada lo advirtiera.
+    #
+    # Se desambiguan por su letra de columna, que es estable entre cargas y
+    # es como las nombra quien abre el Excel.
+    veces = Counter(norm(c["texto"]) for c in mejor_celdas)
+    for c in mejor_celdas:
+        if veces[norm(c["texto"])] > 1:
+            letra = get_column_letter(c["indice"] + 1)
+            c["texto"] = f"{c['texto']} (col {letra})"
+            c["repetido"] = True
 
     # --- columnas con datos que nadie rotuló ------------------------------
     for j in sorted(_columnas_con_datos(ws, primera_dato) - ocupadas):
