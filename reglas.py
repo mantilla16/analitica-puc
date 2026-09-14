@@ -417,6 +417,64 @@ def consolidar_duplicados(filas: list[dict]) -> tuple[list[dict], list[dict]]:
     return salida, duplicados
 
 
+TOLERANCIA_CONTENIDO = Decimal("0.01")
+
+
+def verificar_excluidas(cargadas: list[dict], excluidas: list[dict],
+                        tolerancia: Decimal = TOLERANCIA_CONTENIDO) -> dict:
+    """¿El saldo de lo que se dejó por fuera ya está en lo que sí se cargó?
+
+    Excluir un nivel que el catálogo no reconoce es correcto MIENTRAS ese
+    saldo esté contenido en la cuenta padre. Casi siempre lo está: un
+    subauxiliar es un desglose del auxiliar, y quitarlo pierde detalle, no
+    cifras.
+
+    Pero "casi siempre" no es una respuesta aceptable en un papel de
+    trabajo. Antes el sistema anunciaba "excluí 224 filas" y dejaba al
+    auditor con la duda -- que es la peor forma de informar: alarma sin
+    decir si hay motivo. Aquí se comprueba, y la respuesta se sostiene con
+    aritmética:
+
+    · cada código excluido tiene que tener un ancestro entre los cargados;
+    · la suma de los excluidos que cuelgan de un mismo padre tiene que dar
+      exactamente el saldo de ese padre.
+
+    Si las dos se cumplen, excluirlos no movió una sola cifra. Si alguna
+    falla, hay saldo que se perdió y eso SÍ es bloqueante.
+    """
+    por_cod = {f["codigo_puc"]: Decimal(str(f.get("saldo_final") or 0))
+               for f in cargadas}
+
+    huerfanas, grupos = [], {}
+    for e in excluidas:
+        cod = (e.get("codigo_puc") or "").strip()
+        padre = next((cod[:n] for n in range(len(cod) - 1, 0, -1)
+                      if cod[:n] in por_cod), None)
+        if padre is None:
+            huerfanas.append({"codigo_puc": cod,
+                              "saldo_final": Decimal(str(e.get("saldo_final") or 0))})
+        else:
+            grupos.setdefault(padre, []).append(e)
+
+    descuadres = []
+    for padre, hijos in sorted(grupos.items()):
+        suma = sum((Decimal(str(h.get("saldo_final") or 0)) for h in hijos),
+                   Decimal(0))
+        dif = (suma - por_cod[padre]).quantize(Decimal("0.01"))
+        if abs(dif) > tolerancia:
+            descuadres.append({"codigo_puc": padre, "hijos": len(hijos),
+                               "suma_hijos": suma, "saldo_padre": por_cod[padre],
+                               "diferencia": dif})
+
+    return {
+        "contenidas": not huerfanas and not descuadres,
+        "padres": len(grupos),
+        "huerfanas": huerfanas,
+        "descuadres": descuadres,
+        "tolerancia": tolerancia,
+    }
+
+
 def cuadre_por_nivel(filas: list[dict], niveles: dict[str, dict]) -> list[dict]:
     """Cada nivel completo debe sumar cero. Es la ecuación contable.
 

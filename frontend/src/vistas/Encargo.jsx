@@ -511,11 +511,24 @@ function Hallazgos({ cargaId }) {
         );
       })}
 
-      <p className="text-xs text-tinta-suave">
-        Estas cuentas son las mismas que hacen fallar los controles del papel de
-        trabajo. Mientras no se corrijan en el origen, la conclusión sale como no
-        concluyente.
-      </p>
+      {/* Esta nota se mostraba bajo CUALQUIER hallazgo, incluidos los
+          informativos. Decirle a un auditor que su papel va a salir no
+          concluyente por una exclusión que el propio sistema verificó como
+          inocua es alarmarlo sin motivo -- y quien recibe alarmas falsas
+          termina ignorando las verdaderas. */}
+      {filas.some((h) => h.severidad === "BLOQUEANTE") ? (
+        <p className="text-xs text-tinta-suave">
+          Los hallazgos <strong className="text-rojo">bloqueantes</strong> son los
+          que hacen fallar los controles del papel de trabajo. Mientras no se
+          corrijan en el origen, la conclusión sale como no concluyente.
+        </p>
+      ) : (
+        <p className="text-xs text-tinta-suave">
+          Ninguno de estos hallazgos impide armar el papel de trabajo: son
+          constancia de lo que el sistema encontró y resolvió al leer el
+          archivo.
+        </p>
+      )}
     </div>
   );
 }

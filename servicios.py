@@ -361,6 +361,10 @@ def promover_balance(carga_id: str) -> dict:
     filas, descartadas = [], 0
     fuera_por_digitos: dict[int, int] = {}
     fuera_por_codigo = 0
+    # Se guardan, no solo se cuentan: con el codigo y el saldo se puede
+    # COMPROBAR que lo excluido ya estaba en la cuenta padre, en vez de
+    # anunciar una exclusion y dejar al auditor con la duda.
+    excluidas: list[dict] = []
 
     for s in crudo:
         cod = (s["codigo_puc"] or "").strip()
@@ -372,6 +376,8 @@ def promover_balance(carga_id: str) -> dict:
         if niv is None:                     # Grupo y Subauxiliar no se cargan
             descartadas += 1
             fuera_por_digitos[len(cod)] = fuera_por_digitos.get(len(cod), 0) + 1
+            excluidas.append({"codigo_puc": cod,
+                              "saldo_final": Decimal(s["saldo_final"] or 0)})
             continue
 
         signo = R.resolver_signo(cod, exc, sclase)
@@ -402,12 +408,18 @@ def promover_balance(carga_id: str) -> dict:
     # un 500. Se resuelve segun por que se repite, y siempre se deja dicho.
     filas, duplicados = R.consolidar_duplicados(filas)
 
+    # Se comprueba ANTES de escribir nada: si lo excluido no estaba
+    # contenido, el estado de la carga tiene que reflejarlo.
+    contenido = R.verificar_excluidas(filas, excluidas)
+
     n = db.promover_balance(carga_id, c["cliente_id"], filas)
     db.actualizar_carga(carga_id, convencion_signo=convencion)
 
     cuadre = R.cuadre_por_nivel(filas, niveles)
     lineas = R.cuadre_por_linea(filas)
-    hay_bloqueantes = bool(lineas) or any(q["estado"] == "DESCUADRE" for q in cuadre)
+    hay_bloqueantes = (bool(lineas)
+                       or any(q["estado"] == "DESCUADRE" for q in cuadre)
+                       or not contenido["contenidas"])
     estado = "CON_HALLAZGOS" if hay_bloqueantes else "VALIDADA"
     db.actualizar_carga(carga_id, filas_cargadas=n, estado=estado)
 
@@ -420,15 +432,46 @@ def promover_balance(carga_id: str) -> dict:
         detalle = " · ".join(f"{n} filas de {d} digitos"
                              for d, n in sorted(fuera_por_digitos.items()))
         cargables = ", ".join(str(d) for d in sorted(por_digitos))
-        db.crear_hallazgo(
-            encargo_id=c["encargo_id"], carga_id=carga_id,
-            tipo="NIVEL_NO_CARGABLE", severidad="INFORMATIVO",
-            descripcion=(f"Se excluyeron {sum(fuera_por_digitos.values())} filas "
-                         f"por tener una longitud de codigo que el catalogo no "
-                         f"reconoce como nivel: {detalle}. El catalogo carga "
-                         f"codigos de {cargables} digitos. El analisis y el "
-                         f"cuadre se hicieron SIN esas filas."),
-        )
+        cabeza = (f"Se excluyeron {sum(fuera_por_digitos.values())} filas por "
+                  f"tener una longitud de codigo que el catalogo no reconoce "
+                  f"como nivel: {detalle}. El catalogo carga codigos de "
+                  f"{cargables} digitos.")
+
+        if contenido["contenidas"]:
+            # Comprobado, no supuesto: por eso se puede afirmar que no se
+            # perdio nada en vez de dejarlo como una advertencia abierta.
+            db.crear_hallazgo(
+                encargo_id=c["encargo_id"], carga_id=carga_id,
+                tipo="NIVEL_NO_CARGABLE", severidad="INFORMATIVO",
+                descripcion=(
+                    f"{cabeza} Se verifico que su saldo ya esta contenido en "
+                    f"las {contenido['padres']} cuentas padre que si se "
+                    f"cargaron, y que cada padre cuadra exactamente con la "
+                    f"suma de las filas excluidas que cuelgan de el. Excluirlas "
+                    f"quita detalle, no cifras: el balance no cambia."),
+            )
+        else:
+            # Aqui si se perdio saldo. Es bloqueante: un balance al que le
+            # falta una cifra no puede sostener ninguna conclusion.
+            partes = []
+            if contenido["huerfanas"]:
+                cods = ", ".join(h["codigo_puc"] for h in contenido["huerfanas"][:8])
+                partes.append(
+                    f"{len(contenido['huerfanas'])} no tienen ninguna cuenta "
+                    f"padre cargada, asi que su saldo NO quedo en ningun lado "
+                    f"({cods})")
+            for d in contenido["descuadres"][:5]:
+                partes.append(
+                    f"la cuenta {d['codigo_puc']} vale {d['saldo_padre']} pero "
+                    f"sus {d['hijos']} filas excluidas suman {d['suma_hijos']}, "
+                    f"una diferencia de {d['diferencia']}")
+            db.crear_hallazgo(
+                encargo_id=c["encargo_id"], carga_id=carga_id,
+                tipo="SALDO_EXCLUIDO_PERDIDO", severidad="BLOQUEANTE",
+                descripcion=(f"{cabeza} Y esas filas NO estan contenidas en las "
+                             f"cuentas cargadas: " + "; ".join(partes) +
+                             ". El balance analizado no incluye ese saldo."),
+            )
     if fuera_por_codigo:
         db.crear_hallazgo(
             encargo_id=c["encargo_id"], carga_id=carga_id,
@@ -491,6 +534,8 @@ def promover_balance(carga_id: str) -> dict:
             )
 
     return {"promovidas": n, "descartadas": descartadas,
+            "excluidas_contenidas": contenido["contenidas"],
+            "excluidas_padres": contenido["padres"],
             "fuera_por_digitos": fuera_por_digitos,
             "fuera_por_codigo": fuera_por_codigo,
             "cuadre": cuadre, "descuadres_linea": len(lineas),
