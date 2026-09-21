@@ -1085,6 +1085,14 @@ def consumir_codigo(codigo_id: int) -> None:
              (codigo_id,))
 
 
+def borrar_codigo(codigo_id: int) -> None:
+    """Se usa cuando el envio falla. Marcarlo como usado no basta: la fila
+    seguiria contando para el limite de codigos por ventana, y quien
+    reintenta tres veces porque el correo esta caido quedaria bloqueado
+    quince minutos por codigos que nunca salieron de aqui."""
+    ejecutar("DELETE FROM core.codigo_acceso WHERE id=%s", (codigo_id,))
+
+
 def limpiar_codigos(antes_de: datetime) -> int:
     """Borra los códigos viejos. No son papel de trabajo: son secretos de
     un minuto, y guardarlos para siempre solo acumula riesgo."""

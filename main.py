@@ -316,13 +316,26 @@ def pedir_codigo(c: PedirCodigo, request: Request) -> dict:
                            _ip(request), request.headers.get("user-agent"))
     try:
         via = CO.enviar_codigo(correo, codigo, auth.MINUTOS_VIGENCIA_CODIGO)
-    except CO.CorreoNoConfigurado as e:
-        raise HTTPException(503, f"No se puede enviar el correo. {e}")
     except Exception as e:
-        # El codigo ya quedo creado; se marca consumido para que no ande
-        # suelto un secreto que nadie recibio.
-        db.consumir_codigo(fila["id"])
-        raise HTTPException(502, f"El correo no salio: {e}")
+        # El codigo ya quedo creado y no lo recibio nadie: se BORRA, no se
+        # marca usado. Una fila usada sigue contando para el limite de
+        # envios, y quien reintenta porque el correo esta caido quedaria
+        # bloqueado quince minutos por codigos que nunca salieron de aqui.
+        db.borrar_codigo(fila["id"])
+        if isinstance(e, CO.CorreoNoConfigurado):
+            # Incluye CorreoNoAutorizado: el mensaje ya viene en castellano
+            # y dice que hacer, asi que se pasa tal cual.
+            raise HTTPException(503, str(e)) from None
+        # De un fallo cualquiera -- la red, Microsoft caido -- el detalle
+        # tecnico va al registro, no a la cara de quien intenta entrar.
+        db.registrar(usuario=correo, accion="CODIGO_FALLIDO",
+                     entidad="usuario", exito=False, estado_http=502,
+                     detalle={"error": str(e)[:500]}, ip=_ip(request),
+                     agente=request.headers.get("user-agent"))
+        raise HTTPException(
+            502, "No se pudo enviar el codigo. Intentelo de nuevo en un "
+                 "momento; si sigue fallando, avise al administrador."
+        ) from None
 
     # El codigo NO entra a la bitacora. Si queda constancia del envio.
     db.registrar(usuario=correo, accion="CODIGO_ENVIADO", entidad="usuario",

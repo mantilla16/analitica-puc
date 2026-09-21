@@ -76,6 +76,9 @@ def main() -> int:
             intervalo += 5
             continue
         if estado == "listo":
+            # guardar_refresh escribe el archivo desde cero, asi que la
+            # marca de revocacion desaparece sola: reautorizar ES la
+            # solucion, y la pantalla deja de avisar.
             CO.guardar_refresh(datos["refresh_token"])
             print("\n\nAutorizado.")
             print(f"El token quedo en {CO.ruta_token()}")

@@ -86,6 +86,19 @@ class CorreoNoConfigurado(RuntimeError):
     servidor, el otro se reintenta."""
 
 
+class CorreoNoAutorizado(CorreoNoConfigurado):
+    """La autorización delegada dejó de servir.
+
+    Microsoft invalida el refresh token cuando la persona cambia su
+    contraseña, reconfigura su MFA o un administrador revoca sus sesiones.
+    No es un fallo pasajero: no se arregla reintentando, hay que volver a
+    correr `autorizar_correo.py`.
+
+    Hereda de CorreoNoConfigurado a propósito: quien ya maneja "no se puede
+    enviar" la atrapa sin cambios, y quien quiera distinguirla puede.
+    """
+
+
 def _cfg(nombre: str, defecto: str = "") -> str:
     return os.getenv(nombre, defecto).strip()
 
@@ -126,6 +139,14 @@ def configurado() -> tuple[bool, str | None]:
         if not _leer_refresh():
             return False, ("Nadie ha autorizado el envio todavia. En el "
                            "servidor: python autorizar_correo.py")
+        revocado = _estado_token().get("revocado_en")
+        if revocado:
+            return False, (
+                f"La autorizacion para enviar correo dejo de servir el "
+                f"{revocado[:10]}. Suele pasar al cambiar la contrasena o "
+                f"reconfigurar el MFA de la cuenta que autorizo. Hay que "
+                f"volver a autorizarla en el servidor: "
+                f"python autorizar_correo.py")
         return True, None
     if modo() == "GRAPH":
         necesarias = ["AUDITORIA_GRAPH_TENANT", "AUDITORIA_GRAPH_CLIENTE",
@@ -296,10 +317,24 @@ def _token() -> str:
                 "scope": "https://graph.microsoft.com/.default",
                 "grant_type": "client_credentials",
             }
-        r = _pedir(
-            f"{AUTORIDAD}/{_cfg('AUDITORIA_GRAPH_TENANT')}/oauth2/v2.0/token",
-            urllib.parse.urlencode(campos).encode(),
-            {"Content-Type": "application/x-www-form-urlencoded"})
+        try:
+            r = _pedir(
+                f"{AUTORIDAD}/{_cfg('AUDITORIA_GRAPH_TENANT')}/oauth2/v2.0/token",
+                urllib.parse.urlencode(campos).encode(),
+                {"Content-Type": "application/x-www-form-urlencoded"})
+        except RuntimeError as e:
+            # Se deja constancia en el archivo del token para que la
+            # pantalla de ingreso pueda avisarlo ANTES de que alguien pida
+            # un codigo. Sin esto, cada persona que intente entrar recibe el
+            # mismo muro de texto de Microsoft y nadie sabe que hacer.
+            if _revocado(str(e)):
+                marcar_revocado(str(e))
+                raise CorreoNoAutorizado(
+                    "La autorizacion para enviar correo dejo de servir. Suele "
+                    "pasar al cambiar la contrasena o reconfigurar el MFA de "
+                    "la cuenta que autorizo. Hay que volver a autorizarla en "
+                    "el servidor con: python autorizar_correo.py") from None
+            raise
         if "access_token" not in r:
             raise RuntimeError("Graph no devolvio token")
         # Microsoft rota el refresh token en cada uso. Guardar el nuevo no
@@ -374,6 +409,42 @@ def ruta_token() -> str:
     return _cfg("AUDITORIA_CORREO_TOKEN", "correo_token.json")
 
 
+# Lo que dice Microsoft cuando la autorizacion ya no vale. No es un fallo
+# de red ni de configuracion: es que alguien toco la cuenta.
+SENALES_REVOCADO = ("AADSTS50173", "AADSTS700082", "invalid_grant")
+
+
+def _revocado(mensaje: str) -> bool:
+    return any(s in mensaje for s in SENALES_REVOCADO)
+
+
+def _estado_token() -> dict:
+    try:
+        with open(ruta_token(), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def marcar_revocado(motivo: str) -> None:
+    """Anota que la autorizacion caduco, conservando el token.
+
+    No se borra el refresh token: si el problema fuera otro -- una caida
+    momentanea de Microsoft mal interpretada -- borrarlo obligaria a
+    reautorizar sin necesidad. Se marca, y `autorizar_correo.py` limpia la
+    marca cuando alguien vuelve a autorizar de verdad.
+    """
+    datos = _estado_token()
+    datos["revocado_en"] = datetime.now(timezone.utc).isoformat()
+    datos["revocado_motivo"] = motivo[:300]
+    tmp = ruta_token() + ".nuevo"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(datos, f)
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, ruta_token())
+    log.error("La autorizacion de correo fue revocada: %s", motivo[:300])
+
+
 def _leer_refresh() -> str | None:
     try:
         with open(ruta_token(), encoding="utf-8") as f:
@@ -391,6 +462,9 @@ def guardar_refresh(token: str) -> None:
     """
     ruta = ruta_token()
     tmp = ruta + ".nuevo"
+    # Sin las claves de revocacion: guardar un token nuevo ES la
+    # reautorizacion, y dejar la marca haria que la pantalla siguiera
+    # avisando de un problema ya resuelto.
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump({"refresh_token": token,
                    "guardado": datetime.now(timezone.utc).isoformat()}, f)
