@@ -9,7 +9,7 @@ import { Aviso, Boton } from "../comp/Piezas";
  */
 export default function Mapeo({ cargaId, onListo, onCancelar }) {
   const [datos, setDatos] = useState(null);
-  const [hoja, setHoja] = useState("");
+  const [hojas, setHojas] = useState([]);   // puede ser más de una
   const [cols, setCols] = useState({});
   const [error, setError] = useState(null);
   const [avisos, setAvisos] = useState([]);
@@ -18,7 +18,7 @@ export default function Mapeo({ cargaId, onListo, onCancelar }) {
   useEffect(() => {
     api.mapeo(cargaId).then((d) => {
       setDatos(d);
-      setHoja(d.hoja_sugerida ?? "");
+      setHojas(d.hoja_sugerida ? [d.hoja_sugerida] : []);
       const inicial = {};
       d.sugerencia.forEach((s) => { if (s.campo) inicial[s.campo] = s.encabezado; });
       setCols(inicial);
@@ -28,7 +28,16 @@ export default function Mapeo({ cargaId, onListo, onCancelar }) {
   if (error) return <Aviso tono="error">{error}</Aviso>;
   if (!datos) return <p className="text-sm text-tinta-suave">Leyendo el archivo…</p>;
 
-  const hojaActual = datos.hojas.find((h) => h.hoja === hoja);
+  /* Los encabezados que se ofrecen salen de la PRIMERA hoja marcada. Si
+     otra no los tiene, el servidor rechaza el mapeo al confirmarlo y dice
+     cuál: mejor eso que ofrecer aquí una unión de columnas que en ninguna
+     hoja existe entera. */
+  const hojaActual = datos.hojas.find((h) => h.hoja === hojas[0]);
+  const marcada = (n) => hojas.includes(n);
+  const alternarHoja = (n) => setHojas((v) =>
+    v.includes(n) ? v.filter((x) => x !== n)
+                  : datos.hojas.map((h) => h.hoja).filter(
+                      (x) => v.includes(x) || x === n));   // conserva el orden del archivo
   const encabezados = hojaActual?.encabezados ?? [];
   const sinUsar = encabezados.filter((e) => !Object.values(cols).includes(e));
   const faltan = datos.campos_estandar.filter((c) => c.requerido && !cols[c.campo]);
@@ -38,10 +47,14 @@ export default function Mapeo({ cargaId, onListo, onCancelar }) {
     setError(null);
     try {
       const r = await api.confirmarMapeo(cargaId, {
-        hoja,
+        hojas,
+        // `hoja` se sigue mandando para que un perfil nuevo lo entiendan
+        // también las versiones que solo leen una.
+        hoja: hojas[0],
         columnas: cols,
         formato_fecha: "DD/MM/YYYY",
-        ignorar_hojas: datos.hojas.map((h) => h.hoja).filter((h) => h !== hoja),
+        ignorar_hojas: datos.hojas.map((h) => h.hoja)
+                                  .filter((h) => !hojas.includes(h)),
       });
       setAvisos(r.avisos ?? []);
       onListo();
@@ -82,21 +95,44 @@ export default function Mapeo({ cargaId, onListo, onCancelar }) {
         </div>
       )}
 
+      {/* Marcar varias, porque hay ERP que parten un mismo corte en tres
+          pestañas. Antes solo se podía elegir una y las demás se perdían sin
+          que nada lo dijera: el auditor habría analizado un tercio del
+          periodo creyendo que lo tenía completo. */}
       {datos.hojas.length > 1 && (
-        <label className="mb-6 block max-w-xs">
-          <span className="rotulo">Hoja</span>
-          <select
-            value={hoja}
-            onChange={(e) => setHoja(e.target.value)}
-            className="mt-1 w-full px-3 py-2 text-sm"
-          >
+        <div className="mb-6">
+          <p className="rotulo">Hojas por leer</p>
+          <p className="mt-1 mb-2 text-xs text-tinta-suave">
+            Marque todas las que sean de este mismo insumo. Si el archivo
+            reparte el corte en varias, van todas juntas.
+          </p>
+          <div className="max-w-lg overflow-hidden rounded-[9px] border border-regla">
             {datos.hojas.map((h) => (
-              <option key={h.hoja} value={h.hoja}>
-                {h.hoja} — {h.encabezados.length} columnas, {h.reconocidos} reconocidas
-              </option>
+              <label key={h.hoja}
+                     className={`flex cursor-pointer items-center gap-3 border-b
+                                 border-regla-fina px-3 py-2 text-sm last:border-b-0
+                                 hover:bg-papel-hondo ${
+                                   marcada(h.hoja) ? "bg-papel-hondo" : ""}`}>
+                <input type="checkbox" checked={marcada(h.hoja)}
+                       onChange={() => alternarHoja(h.hoja)} />
+                <span className="min-w-0 flex-1 truncate font-medium">{h.hoja}</span>
+                <span className="shrink-0 text-xs text-tinta-suave">
+                  {h.fila_encabezado
+                    ? `${h.encabezados.length} columnas · ${h.reconocidos} reconocidas`
+                    : "sin encabezado reconocible"}
+                </span>
+              </label>
             ))}
-          </select>
-        </label>
+          </div>
+          {hojas.length > 1 && (
+            <p className="mt-2 text-xs text-tinta-media">
+              Se leerán <span className="cifra">{hojas.length}</span> hojas con
+              el mismo mapeo. Las columnas de abajo salen de{" "}
+              <span className="cifra">{hojas[0]}</span>; si alguna de las otras
+              no las tiene, se lo digo al confirmar.
+            </p>
+          )}
+        </div>
       )}
 
       {error && <div className="mb-4"><Aviso tono="error">{error}</Aviso></div>}
@@ -148,7 +184,8 @@ export default function Mapeo({ cargaId, onListo, onCancelar }) {
       )}
 
       <div className="mt-8 flex items-center gap-3">
-        <Boton onClick={guardar} disabled={guardando || faltan.length > 0}>
+        <Boton onClick={guardar}
+               disabled={guardando || faltan.length > 0 || hojas.length === 0}>
           {guardando ? "Guardando…" : "Confirmar y continuar"}
         </Boton>
         <Boton variante="texto" onClick={onCancelar}>Cancelar</Boton>
@@ -156,6 +193,9 @@ export default function Mapeo({ cargaId, onListo, onCancelar }) {
           <span className="text-xs text-rojo">
             Falta relacionar: {faltan.map((f) => f.etiqueta).join(", ")}
           </span>
+        )}
+        {hojas.length === 0 && (
+          <span className="text-xs text-rojo">Marque al menos una hoja.</span>
         )}
       </div>
 

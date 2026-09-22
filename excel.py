@@ -402,37 +402,72 @@ def _descartable(codigo: Any) -> bool:
 NUMERICOS = {"saldo_inicial", "debito", "credito", "saldo_final"}
 
 
+def hojas_del_perfil(perfil: dict) -> list[str]:
+    """Las hojas que el perfil manda leer, en orden.
+
+    `hojas` es lo que se usa desde que un mismo corte puede venir repartido
+    en varias. `hoja` se conserva para los perfiles guardados antes: un
+    cambio de formato no puede invalidar en silencio el mapeo que alguien
+    confirmó hace meses.
+    """
+    hojas = perfil.get("hojas")
+    if hojas:
+        return [h for h in hojas if h]
+    una = perfil.get("hoja")
+    return [una] if una else []
+
+
 def parsear(ruta: str | Path, perfil: dict, naturaleza: str) -> Iterator[dict]:
-    """Genera filas normalizadas. No carga el archivo entero en memoria."""
+    """Genera filas normalizadas. No carga el archivo entero en memoria.
+
+    Cuando el perfil nombra varias hojas se leen TODAS y sus filas salen
+    encadenadas, cada una marcada con su hoja de origen. Es el caso del ERP
+    que parte el movimiento de un mismo corte en tres pestañas: antes se
+    leia la primera y las otras dos desaparecian sin que nada lo dijera --
+    el auditor habria analizado un tercio del periodo creyendo que lo tenia
+    completo.
+
+    Si el perfil nombra una hoja que este archivo no tiene, se DETIENE. Es
+    tentador saltarla y seguir, pero eso es exactamente perder datos en
+    silencio: mejor que falle y alguien mire.
+    """
     columnas = perfil["columnas"]
-    hoja_perfil = perfil.get("hoja")
+    pedidas = hojas_del_perfil(perfil)
     ignorar = {norm(h) for h in perfil.get("ignorar_hojas", [])}
     fmt_fecha = perfil.get("formato_fecha", "DD/MM/YYYY")
 
     wb = load_workbook(ruta, read_only=True, data_only=True)
     try:
-        objetivo = [hoja_perfil] if hoja_perfil in wb.sheetnames else [
-            h for h in wb.sheetnames if norm(h) not in ignorar
-        ]
+        if pedidas:
+            faltan = [h for h in pedidas if h not in wb.sheetnames]
+            if faltan:
+                raise ValueError(
+                    "El archivo no tiene la(s) hoja(s) del perfil: "
+                    + ", ".join(repr(h) for h in faltan)
+                    + ". Tiene: " + ", ".join(repr(h) for h in wb.sheetnames))
+            objetivo = pedidas
+        else:
+            objetivo = [h for h in wb.sheetnames if norm(h) not in ignorar]
 
         for nombre in objetivo:
             ws = wb[nombre]
             fila_enc, celdas = _detectar_encabezado(ws)
             if not fila_enc:
+                if pedidas:
+                    raise ValueError(
+                        f"La hoja {nombre!r} no tiene una fila de encabezado "
+                        f"reconocible.")
                 continue
             try:
                 idx = _indices(columnas, celdas)
-            except ValueError:
-                if hoja_perfil:
-                    raise
+            except ValueError as e:
+                if pedidas:
+                    # Se nombra la hoja: con varias, "falta una columna" sin
+                    # decir dónde obliga a abrirlas todas a mano.
+                    raise ValueError(f"En la hoja {nombre!r}: {e}") from None
                 continue          # hoja auxiliar sin los encabezados esperados
 
-            # Separar índices reales de los sintéticos (negativos).
-            # Los sintéticos corresponden a encabezados en filas adicionales
-            # que no se pueden leer de la misma columna de datos (p. ej.
-            # "Descripción" debajo de "Cuentas" en SIESA 2025).
-            idx_real = {k: v for k, v in idx.items() if v >= 0}
-            n_col = max(idx_real.values()) + 1 if idx_real else 0
+            n_col = max(idx.values()) + 1 if idx else 0
 
             for n, fila in enumerate(_filas(ws, min_row=fila_enc + 1),
                                      start=fila_enc + 1):
@@ -440,16 +475,11 @@ def parsear(ruta: str | Path, perfil: dict, naturaleza: str) -> Iterator[dict]:
                     continue
                 fila = tuple(fila) + (None,) * (n_col - len(fila))
 
-                if "codigo_puc" in idx_real and _descartable(fila[idx_real["codigo_puc"]]):
+                if "codigo_puc" in idx and _descartable(fila[idx["codigo_puc"]]):
                     continue
 
                 out: dict[str, Any] = {"fila_origen": n, "hoja": nombre}
                 for campo, j in idx.items():
-                    if j < 0:
-                        # índice sintético: el valor no está en esta fila
-                        # (vino de una fila adicional durante la inspección)
-                        out[campo] = None
-                        continue
                     v = fila[j]
                     if campo in NUMERICOS:
                         out[campo] = a_numero(v)

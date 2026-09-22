@@ -581,7 +581,13 @@ class AjusteObservacion(BaseModel):
 
 
 class MapeoConfirmado(BaseModel):
-    hoja: str
+    """`hojas` manda; `hoja` queda por los perfiles y clientes antiguos.
+
+    Un mismo corte puede venir repartido en varias pestañas, asi que la
+    eleccion es una lista. Si solo llega `hoja`, se toma como lista de una.
+    """
+    hojas: list[str] | None = None
+    hoja: str | None = None
     columnas: dict[str, str | None]
     formato_fecha: str = "DD/MM/YYYY"
     ignorar_hojas: list[str] = []
@@ -891,8 +897,14 @@ def pantalla_mapeo(carga_id: str) -> dict:
 def confirmar_mapeo(carga_id: str, m: MapeoConfirmado,
                     request: Request) -> dict:
     _carga(carga_id)
+    hojas = [h for h in (m.hojas or ([m.hoja] if m.hoja else [])) if h]
+    if not hojas:
+        raise HTTPException(422, "Indique al menos una hoja")
     mapeo = {
-        "hoja": m.hoja,
+        "hojas": hojas,
+        # Se guarda tambien la primera suelta: hay codigo y perfiles viejos
+        # que leen `hoja`, y que dejaran de funcionar callados si desaparece.
+        "hoja": hojas[0],
         "columnas": {k: v for k, v in m.columnas.items() if v},
         "formato_fecha": m.formato_fecha,
         "ignorar_hojas": m.ignorar_hojas,

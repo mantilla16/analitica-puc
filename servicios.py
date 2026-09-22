@@ -50,6 +50,37 @@ def abrir_encargo(nit: str, razon_social: str, fecha_corte: date,
 # MAPEO
 # =====================================================================
 
+def _hojas_incompatibles(c: dict, mapeo: dict) -> list[dict]:
+    """Las hojas elegidas cuyo encabezado no soporta este mapeo."""
+    hojas = X.hojas_del_perfil(mapeo)
+    if len(hojas) < 2:
+        return []                      # con una sola no hay nada que cotejar
+
+    est = X.inspeccionar(Path(c["archivo"]))
+    por_nombre = {h["hoja"]: h for h in est["hojas"]}
+    columnas = {k: v for k, v in (mapeo.get("columnas") or {}).items() if v}
+
+    problemas = []
+    for nombre in hojas:
+        h = por_nombre.get(nombre)
+        if h is None:
+            problemas.append({
+                "severidad": "ERROR",
+                "problema": "La hoja elegida no está en el archivo",
+                "detalle": nombre,
+            })
+            continue
+        try:
+            X._indices(columnas, h["columnas"])
+        except ValueError as e:
+            problemas.append({
+                "severidad": "ERROR",
+                "problema": f"La hoja {nombre!r} no tiene las columnas del mapeo",
+                "detalle": str(e),
+            })
+    return problemas
+
+
 def sugerir_mapeo(naturaleza: str, encabezados: list[str]) -> list[dict]:
     sin = db.sinonimos(naturaleza)
     campos = {c["campo"]: c for c in db.campos_estandar(naturaleza)}
@@ -97,6 +128,14 @@ def confirmar_mapeo(carga_id: str, mapeo: dict, usuario: str | None) -> dict:
     c = db.carga(carga_id)
     campos = db.campos_estandar(c["naturaleza"])
     problemas = R.validar_mapeo(mapeo, campos)
+
+    # Con varias hojas hay que comprobar el mapeo contra TODAS, no solo
+    # contra la que se miro al armarlo. Un ERP puede repartir el mismo
+    # corte en tres pestañas y poner las columnas en otro orden en la
+    # tercera; descubrirlo al confirmar es barato, descubrirlo al procesar
+    # es una carga a medias.
+    problemas += _hojas_incompatibles(c, mapeo)
+
     errores = [p for p in problemas if p["severidad"] == "ERROR"]
     if errores:
         return {"ok": False, "problemas": problemas}
@@ -126,6 +165,20 @@ def procesar(carga_id: str) -> dict:
     )
     n = db.copiar_staging(carga_id, nat, filas)
     db.actualizar_carga(carga_id, filas_staging=n)
+
+    # Cuantas filas trajo cada hoja. Con un corte repartido en varias, "se
+    # leyeron 12.188 filas" no dice si entraron las tres o solo una: el
+    # desglose es lo que lo vuelve comprobable de un vistazo.
+    por_hoja = db.filas_por_hoja(carga_id, nat)
+    if len(por_hoja) > 1:
+        detalle = " · ".join(f"{f['hoja']}: {f['filas']}" for f in por_hoja)
+        db.crear_hallazgo(
+            encargo_id=c["encargo_id"], carga_id=carga_id,
+            tipo="VARIAS_HOJAS", severidad="INFORMATIVO",
+            descripcion=(f"El archivo trae este insumo repartido en "
+                         f"{len(por_hoja)} hojas y se leyeron todas: "
+                         f"{detalle}. Total {n} filas."),
+        )
 
     resultado = cotejar(carga_id)
 

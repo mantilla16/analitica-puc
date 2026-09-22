@@ -514,6 +514,16 @@ def copiar_staging(carga_id: str, naturaleza: str, filas: Iterable[dict]) -> int
     return n
 
 
+def filas_por_hoja(carga_id: str, naturaleza: str) -> list[dict]:
+    """Cuántas filas aportó cada hoja del archivo."""
+    return varios(
+        f"""SELECT coalesce(hoja, '(sin nombre)') AS hoja, count(*) AS filas
+              FROM {TABLA[naturaleza]} WHERE carga_id=%s
+             GROUP BY hoja ORDER BY min(fila_origen)""",
+        (carga_id,),
+    )
+
+
 def huellas_staging(carga_id: str, naturaleza: str) -> dict[str, str]:
     return {
         f["llave"]: f["huella"]
