@@ -483,12 +483,22 @@ def iniciar_dispositivo() -> dict:
         datos, {"Content-Type": "application/x-www-form-urlencoded"})
 
 
+# "Todavia no" y "pregunte mas despacio" en las formas en que Microsoft los
+# dice. El campo `error` del JSON trae `authorization_pending`, pero
+# `error_description` lo escribe como "Authorization is pending" junto al
+# codigo AADSTS70016, y `_pedir` conserva la descripcion, no el campo. Mirar
+# solo una de las dos formas hacia que la autorizacion se abortara en el
+# primer sondeo, antes de que nadie alcanzara a escribir el codigo.
+PENDIENTE = ("authorization_pending", "authorization is pending", "aadsts70016")
+
+
 def consultar_dispositivo(device_code: str) -> tuple[str, dict]:
     """(estado, datos) mientras se espera a que la persona apruebe.
 
-    Los "errores" authorization_pending y slow_down no son errores: son la
-    forma en que Microsoft dice "todavia no" y "pregunte mas despacio".
-    Tratarlos como fallos abortaria la autorizacion apenas empezada.
+    `authorization_pending` y `slow_down` no son errores: son la forma en
+    que Microsoft dice "todavia no" y "pregunte mas despacio". Tratarlos
+    como fallos abortaria la autorizacion apenas empezada -- que es
+    exactamente lo que pasaba, y por eso el codigo se cancelaba enseguida.
     """
     datos = urllib.parse.urlencode({
         "client_id": _cfg("AUDITORIA_GRAPH_CLIENTE"),
@@ -500,9 +510,12 @@ def consultar_dispositivo(device_code: str) -> tuple[str, dict]:
         r = _pedir(url, datos, {"Content-Type": "application/x-www-form-urlencoded"})
         return "listo", r
     except RuntimeError as e:
-        texto = str(e)
-        if "authorization_pending" in texto:
+        # En minusculas: Microsoft alterna mayusculas entre el campo y la
+        # descripcion, y una comparacion sensible a ellas volveria a fallar
+        # con el mismo sintoma desconcertante.
+        texto = str(e).lower()
+        if any(p in texto for p in PENDIENTE):
             return "pendiente", {}
         if "slow_down" in texto:
             return "lento", {}
-        return "rechazado", {"error": "", "error_description": texto}
+        return "rechazado", {"error": "", "error_description": str(e)}
