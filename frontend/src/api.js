@@ -30,6 +30,7 @@ const json = (metodo, cuerpo) => ({
 export const api = {
   // ------------------------------------------------------------ sesión
   estadoAuth: () => pedir("/auth/estado"),
+  loginMicrosoft: (id_token) => pedir("/auth/microsoft", json("POST", { id_token })),
   pedirCodigo: (correo) => pedir("/auth/codigo", json("POST", { correo })),
   verificarCodigo: (correo, codigo) =>
     pedir("/auth/verificar", json("POST", { correo, codigo })),

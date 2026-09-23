@@ -6,3 +6,4 @@ openpyxl>=3.1
 python-multipart>=0.0.9
 pydantic>=2.9
 openai>=1.50
+pyjwt[crypto]>=2.9

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { Anillo, Aviso, Boton } from "../comp/Piezas";
+import { signIn, completeRedirect, describeError, limpiarFragmento } from "../lib/msal";
 
 /* Lo que se promete aquí es lo que la herramienta realmente hace. Poner
    beneficios genéricos en una pantalla de ingreso interna no informa a
@@ -30,9 +31,54 @@ export default function Login({ onEntrar }) {
   const [ocupado, setOcupado] = useState(false);
   const [cfg, setCfg] = useState(null);
   const [segundos, setSegundos] = useState(0);
+  /* Al volver de Microsoft la URL trae el código en el fragmento. Se
+     arranca ya en "conectando" para no mostrar el botón un instante
+     antes de entrar. */
+  const [conectandoMS, setConectandoMS] = useState(
+    () => typeof window !== "undefined" && /[#&](code|error)=/.test(window.location.hash),
+  );
   const campoCodigo = useRef(null);
 
   useEffect(() => { api.estadoAuth().then(setCfg).catch(() => setCfg(null)); }, []);
+
+  /* Vuelta de Microsoft: se recoge el id_token del fragmento y se cambia
+     por una sesión del backend. Si no hay nada que completar -- por
+     ejemplo, al cerrar sesión con el fragmento todavía en la barra --,
+     se apaga el estado en vez de dejar la pantalla girando. */
+  useEffect(() => {
+    if (!cfg) return;
+    const listo = cfg.msClientId && cfg.msTenantId;
+    if (!listo) {
+      if (conectandoMS) { setConectandoMS(false); limpiarFragmento(); }
+      return;
+    }
+    let cancelado = false;
+    completeRedirect(cfg)
+      .then((idToken) => {
+        if (cancelado) return;
+        if (!idToken) return setConectandoMS(false);
+        setConectandoMS(true);
+        return api.loginMicrosoft(idToken).then(onEntrar);
+      })
+      .catch((err) => {
+        if (cancelado) return;
+        setError(describeError(err));
+        setConectandoMS(false);
+      });
+    return () => { cancelado = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cfg]);
+
+  async function entrarConMicrosoft() {
+    setError(null);
+    setConectandoMS(true);
+    try {
+      await signIn(cfg);          // no retorna: la pestaña navega
+    } catch (err) {
+      setError(describeError(err));
+      setConectandoMS(false);
+    }
+  }
 
   // Cuenta atrás para poder reenviar. Sin esto la gente pulsa "reenviar"
   // tres veces en diez segundos y se topa con el límite del servidor sin
@@ -168,16 +214,45 @@ export default function Login({ onEntrar }) {
           {paso === "correo" ? (
             <>
               <h2 className="mt-1.5 text-2xl font-bold tracking-tight">
-                Ingrese con su correo
+                Ingrese a su cuenta
               </h2>
               <p className="mt-2 text-sm text-tinta-media">
-                Le enviamos un código de {largo} dígitos a su buzón. Solo
-                funcionan los correos <span className="cifra">@{dominio}</span>.
+                Con su cuenta institucional{" "}
+                <span className="cifra">@{dominio}</span>.
               </p>
 
               {error && <div className="mt-6"><Aviso tono="error">{error}</Aviso></div>}
 
-              <form onSubmit={enviarCodigo} className="mt-8 space-y-5">
+              {/* Microsoft primero. Si el servidor tiene msClientId/msTenantId
+                  configurados, este es el camino que la gente debería usar:
+                  sin códigos, sin buzones, con la sesión que ya tiene abierta
+                  en su Outlook. El formulario de código queda debajo como
+                  alternativa por si Microsoft falla. */}
+              {cfg?.msClientId && cfg?.msTenantId && (
+                <div className="mt-8">
+                  <Boton onClick={entrarConMicrosoft}
+                         disabled={conectandoMS}
+                         className="w-full justify-center gap-3">
+                    {/* Cuatro cuadros de la marca Microsoft, sin depender de
+                        imágenes externas. */}
+                    <svg width="16" height="16" viewBox="0 0 21 21" aria-hidden="true">
+                      <rect x="1"  y="1"  width="9" height="9" fill="#f25022"/>
+                      <rect x="11" y="1"  width="9" height="9" fill="#7fba00"/>
+                      <rect x="1"  y="11" width="9" height="9" fill="#00a4ef"/>
+                      <rect x="11" y="11" width="9" height="9" fill="#ffb900"/>
+                    </svg>
+                    {conectandoMS ? "Conectando…" : "Entrar con Microsoft"}
+                  </Boton>
+
+                  <div className="mt-6 flex items-center gap-3 text-xs text-tinta-suave">
+                    <span className="h-px flex-1 bg-regla" />
+                    <span>o con un código al correo</span>
+                    <span className="h-px flex-1 bg-regla" />
+                  </div>
+                </div>
+              )}
+
+              <form onSubmit={enviarCodigo} className="mt-6 space-y-5">
                 <label className="block">
                   <span className="rotulo">Correo</span>
                   <input type="email" value={correo} required autoFocus
@@ -187,9 +262,10 @@ export default function Login({ onEntrar }) {
                          className={`${campo} mt-1.5`} />
                 </label>
 
-                <Boton type="submit" disabled={ocupado || !correo.trim()}
+                <Boton type="submit" variante="contorno"
+                       disabled={ocupado || !correo.trim()}
                        className="w-full justify-center">
-                  {ocupado ? "Enviando…" : "Enviarme el código"}
+                  {ocupado ? "Enviando…" : "Enviarme un código"}
                 </Boton>
               </form>
             </>

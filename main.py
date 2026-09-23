@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 
 import auth
 import correo as CO
+import entra
 import db
 import excel as X
 import servicios as S
@@ -69,7 +70,8 @@ def _cerrar() -> None:
 # =====================================================================
 
 # Lo único accesible sin sesión. Todo lo demás exige haber entrado.
-PUBLICAS = {"/auth/estado", "/auth/codigo", "/auth/verificar"}
+PUBLICAS = {"/auth/estado", "/auth/codigo", "/auth/verificar",
+            "/auth/microsoft"}
 
 # Con la cuenta a medio hacer -- buzon probado, datos sin llenar -- solo
 # se puede llegar a estas. No es una restriccion cosmetica: sin ella
@@ -235,6 +237,10 @@ class UsuarioCambio(BaseModel):
     activo: bool | None = None
 
 
+class LoginMicrosoft(BaseModel):
+    id_token: str
+
+
 class PedirCodigo(BaseModel):
     correo: str
 
@@ -280,7 +286,66 @@ def auth_estado() -> dict:
     return {"dominio": auth.DOMINIO, "correo_listo": sirve,
             "correo_problema": falta, "modo_correo": CO.modo(),
             "largo_codigo": auth.LARGO_CODIGO,
-            "minutos_codigo": auth.MINUTOS_VIGENCIA_CODIGO}
+            "minutos_codigo": auth.MINUTOS_VIGENCIA_CODIGO,
+            # Datos del login con Microsoft. El id de aplicacion y el de
+            # inquilino no son secretos: se dan al frontend para que arme
+            # MSAL sin recompilar por cada firma o entorno.
+            "msClientId": entra.cliente() or None,
+            "msTenantId": entra.tenant() or None}
+
+
+@app.post("/auth/microsoft")
+def login_microsoft(m: LoginMicrosoft, request: Request,
+                    response: Response) -> dict:
+    """Inicio de sesion con la cuenta de Microsoft 365 de la firma.
+
+    El frontend consigue el id_token con MSAL en el navegador; aqui se
+    verifica su firma contra las claves publicas del inquilino ANTES de
+    creer nada de su contenido. Solo despues de eso se busca o crea la
+    cuenta local.
+
+    Como MSAL ya autentico contra Microsoft, la cuenta queda con nombre y
+    registrada de una vez -- no hace falta pedirle los datos por segunda
+    vez con el formulario de registro.
+    """
+    if not entra.configurado():
+        raise HTTPException(503, "El login con Microsoft no esta configurado")
+    try:
+        perfil = entra.verificar_id_token(m.id_token)
+    except Exception as e:
+        db.registrar(usuario="(microsoft)", accion="INGRESO_FALLIDO",
+                     entidad="usuario", exito=False, estado_http=401,
+                     detalle={"motivo": f"token rechazado: {e}"},
+                     ip=_ip(request), agente=request.headers.get("user-agent"))
+        raise HTTPException(401, "No se pudo validar tu sesion de Microsoft")
+
+    correo = auth.normalizar_correo(perfil["correo"])
+    problema = auth.problema_con_correo(correo)
+    if problema:
+        raise HTTPException(403, problema)
+
+    u = db.usuario_por_correo(correo)
+    if u and not u["activo"]:
+        raise HTTPException(403, "Cuenta desactivada")
+    nuevo = u is None
+    if nuevo:
+        u = db.crear_usuario_por_correo(correo, correo.split("@")[0])
+
+    # Con Microsoft ya viene el nombre. Se toma como registro completo:
+    # sin popup adicional, la cuenta queda utilizable de una vez.
+    cambios = {"nombre": perfil["nombre"] or u["nombre"]}
+    if u["registrado_en"] is None:
+        cambios["registrado_en"] = datetime.now(timezone.utc)
+    cambios["ultimo_acceso"] = datetime.now(timezone.utc)
+    u = db.actualizar_usuario(u["id"], **cambios)
+
+    _sesion_nueva(u, request, response)
+    db.registrar(usuario_id=u["id"], usuario=u["usuario"],
+                 accion="CUENTA_CREADA" if nuevo else "INGRESO",
+                 entidad="usuario",
+                 detalle={"via": "microsoft"},
+                 ip=_ip(request), agente=request.headers.get("user-agent"))
+    return _perfil(u)
 
 
 @app.post("/auth/codigo")
