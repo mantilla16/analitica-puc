@@ -218,7 +218,7 @@ def construir(p: dict) -> bytes:
         filas.append([c["codigo"], c["marca"], c["nombre"], c["estado"],
                       "Sí" if c["es_evidencia"] else "No — consistencia interna",
                       c["detalle"]])
-    fin = _tabla(h, 4,
+    _tabla(h, 4,
         ["Código", "Marca", "Control", "Estado", "¿Evidencia?", "Detalle"],
         filas, anchos=[9, 7, 34, 15, 26, 90], principal=True)
 

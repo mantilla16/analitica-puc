@@ -94,7 +94,7 @@ def _sobre_que_datos(contrato: list[dict]) -> str:
 
     uno = len(cargados) == 1
     texto = (
-        f"Trabajé sobre "
+        "Trabajé sobre "
         + ("un archivo entregado por el cliente, del cual"
            if uno else
            f"{len(cargados)} archivos entregados por el cliente, de los cuales")
@@ -189,7 +189,7 @@ def _tolerancias(gates: list[dict]) -> list[str]:
         f"{cifras.get('tolerancia_por_cuenta')} de diferencia por cuenta, que "
         f"es cuanto puede variar el redondeo entre dos exportes del mismo "
         f"mayor. "
-        + (f"Una cuenta se apoyó en esa tolerancia y la dejo listada"
+        + ("Una cuenta se apoyó en esa tolerancia y la dejo listada"
            if una else
            f"{len(redondeos)} cuentas se apoyaron en esa tolerancia y las dejo "
            f"listadas")
