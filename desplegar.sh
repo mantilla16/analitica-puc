@@ -52,7 +52,18 @@ else
     rojo "No encuentro .venv/bin/python; me salto las pruebas."
 fi
 
-# ------------------------------------------------------------ 3. frontend
+# ------------------------------------------------- 3. dependencias Python
+# Si `requirements.txt` cambio (una libreria nueva, una version fija), sin
+# esto el servicio arranca importando lo viejo y muere con ImportError. Ya
+# nos paso una vez con pyjwt; que no vuelva a pasar.
+paso "Dependencias Python"
+if [ -x .venv/bin/pip ]; then
+    .venv/bin/pip install --quiet --disable-pip-version-check -r requirements.txt
+else
+    rojo "No encuentro .venv/bin/pip; me salto la instalacion de Python."
+fi
+
+# ------------------------------------------------------------ 4. frontend
 paso "Construyendo el frontend"
 ( cd frontend && npm ci --silent && npm run build )
 
