@@ -9,30 +9,13 @@ Configuración, por variables de entorno (en /etc/analitica-puc.env, que
 es root:root 600 -- la contraseña del buzón no puede quedar visible en
 `systemctl show` ni en el historial del shell):
 
-    AUDITORIA_CORREO_MODO      RESEND | GRAPH_USUARIO | GRAPH | SMTP | RELAY | CONSOLA
+    AUDITORIA_CORREO_MODO      GRAPH_USUARIO | GRAPH | SMTP | RELAY | CONSOLA
     AUDITORIA_SMTP_HOST        smtp.office365.com
     AUDITORIA_SMTP_PUERTO      587
     AUDITORIA_SMTP_USUARIO     buzón que autentica
     AUDITORIA_SMTP_CLAVE       su contraseña o contraseña de aplicación
     AUDITORIA_CORREO_DE        remitente que ve la gente
     AUDITORIA_CORREO_NOMBRE    nombre del remitente
-
-El modo RESEND envia por resend.com, un proveedor transaccional. Es la
-salida cuando el correo del dominio no llega porque la IP del servidor no
-esta autorizada en el SPF de rbcol.co: Resend tiene su propio dominio,
-SPF, DKIM y DMARC bien configurados, asi que los correos llegan sin caer
-en cuarentena. El precio es cosmetico: el remitente visible es del dominio
-del proveedor (onboarding@resend.dev), no de rbcol.co. Se ve "de fuera",
-pero llega.
-
-    AUDITORIA_RESEND_API       clave de la API (empieza por `re_`)
-    AUDITORIA_CORREO_DE        remitente. onboarding@resend.dev funciona sin
-                               verificar nada; con dominio propio verificado
-                               puede ser noreply@rbcol.co
-    AUDITORIA_CORREO_NOMBRE    nombre visible
-
-Registro: https://resend.com/signup (gratis, 3000 correos/mes). En el
-dashboard, API Keys -> Create API Key -> pegar en AUDITORIA_RESEND_API.
 
 El modo GRAPH_USUARIO usa la API de Microsoft con permiso DELEGADO: envia
 como una persona concreta, la que autorizo una vez con
@@ -149,12 +132,6 @@ def configurado() -> tuple[bool, str | None]:
     de ingreso en vez de dejar a la gente pidiendo códigos que no salen."""
     if modo() == "CONSOLA":
         return True, None
-    if modo() == "RESEND":
-        necesarias = ["AUDITORIA_RESEND_API", "AUDITORIA_CORREO_DE"]
-        faltan = [n for n in necesarias if not _cfg(n)]
-        if faltan:
-            return False, "Falta configurar " + ", ".join(faltan)
-        return True, None
     if modo() == "GRAPH_USUARIO":
         necesarias = ["AUDITORIA_GRAPH_TENANT", "AUDITORIA_GRAPH_CLIENTE"]
         faltan = [n for n in necesarias if not _cfg(n)]
@@ -240,8 +217,6 @@ def enviar_codigo(correo: str, codigo: str, minutos: int) -> str:
     nombre_de, direccion_de = remitente()
     texto, html = _cuerpo(codigo, minutos)
 
-    if modo() == "RESEND":
-        return _enviar_por_resend(correo, texto, html)
     if modo() in ("GRAPH", "GRAPH_USUARIO"):
         return _enviar_por_graph(correo, texto, html)
 
@@ -556,35 +531,3 @@ def consultar_dispositivo(device_code: str) -> tuple[str, dict]:
         if "slow_down" in texto:
             return "lento", {}
         return "rechazado", {"error": "", "error_description": str(e)}
-
-
-# =====================================================================
-# RESEND
-# =====================================================================
-
-def _enviar_por_resend(correo: str, texto: str, html: str) -> str:
-    """POST a https://api.resend.com/emails.
-
-    Resend responde 200 con `{"id": "..."}` o el error como JSON con `name`
-    y `message`. `_pedir` conserva ese cuerpo, asi que un rechazo se ve en
-    la pantalla de ingreso con su motivo real -- que sirve para depurar sin
-    ir al dashboard.
-    """
-    nombre_de, direccion_de = remitente()
-    cuerpo = json.dumps({
-        "from": f"{nombre_de} <{direccion_de}>",
-        "to": [correo],
-        "subject": ASUNTO,
-        "text": texto,
-        "html": html,
-        "headers": {
-            "Auto-Submitted": "auto-generated",
-            "X-Auto-Response-Suppress": "All",
-        },
-    }).encode("utf-8")
-    r = _pedir("https://api.resend.com/emails", cuerpo,
-               {"Authorization": f"Bearer {_cfg('AUDITORIA_RESEND_API')}",
-                "Content-Type": "application/json"})
-    if "id" not in r:
-        raise RuntimeError(f"Resend no devolvio id: {r}")
-    return f"RESEND {r['id']}"
