@@ -269,6 +269,48 @@ todo llega al navegador bajo el mismo origen.
 servidor no tiene sentido armarlo todavía -- cuando lo haya, es un
 `certbot --nginx` y listo.
 
+## Desplegar y probar
+
+### Desplegar
+
+```bash
+cd ~/analitica-puc && ./desplegar.sh
+```
+
+Trae el código, corre las pruebas, construye el frontend, reinicia el
+servicio y **comprueba que la aplicación quedó respondiendo**. Esto último
+es el punto: lo que se olvidaba no eran los pasos sino verificar el
+resultado, y una aplicación caída se descubría horas después.
+
+Cada comprobación del script existe por un tropiezo concreto:
+
+| Comprueba | Por qué |
+| --- | --- |
+| Que no haya cambios sin commitear | Un arreglo editado en el servidor no lo ve nadie más y el próximo `git pull` lo borra |
+| Que nginx sirva desde donde se construye | El build puede hacerse y no publicarse: la aplicación sigue mostrando la versión vieja sin decir nada |
+| Que la aplicación levante, esperándola | `systemctl restart` vuelve al lanzar el proceso, no al estar listo: preguntar antes da un 502 que parece fallo y solo es prisa |
+| Que quien responde en `/api/` sea **esta** aplicación | Cinco aplicaciones comparten el nginx de este servidor; un 200 de la equivocada se ve idéntico |
+
+También se puede lanzar desde **Actions → Desplegar → Run workflow**, que
+corre el mismo script en un runner instalado en el servidor.
+
+### Pruebas
+
+```bash
+python validar_excel.py    # lectura de archivos -- no necesita base de datos
+python validar_motor.py    # reglas contables -- SÍ necesita base con datos
+python -m pyflakes *.py    # nombres rotos, imports que sobran
+```
+
+`validar_excel.py` fabrica sus propios Excel, así que corre en cualquier
+parte y no depende de papeles de clientes. Cada caso es un defecto que ya
+ocurrió: un corte repartido en varias hojas, dos columnas con el mismo
+rótulo, una columna con datos y sin rotular, y un archivo que declara mal su
+propio ancho.
+
+`validar_motor.py` se queda fuera del CI a propósito: valida contra balances
+reales, y esos datos no salen del servidor.
+
 ## Qué NO va en este repo
 
 - `archivos/` -- los Excel que suben los clientes quedan ahí en disco, pero
@@ -277,3 +319,6 @@ servidor no tiene sentido armarlo todavía -- cuando lo haya, es un
   arriba.
 - Contraseñas reales de ningún tipo. `AUDITORIA_DSN` siempre se fija por
   variable de entorno, nunca hardcodeada.
+- `correo_token.json` -- la autorización para enviar los códigos de acceso.
+  Es una credencial viva: quien la tenga puede mandar correo en nombre de
+  quien autorizó.
