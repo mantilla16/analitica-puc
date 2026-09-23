@@ -27,9 +27,13 @@ paso()  { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 
 # --------------------------------------------------------------- 1. código
 paso "Cambios sin guardar"
-if ! git diff --quiet || ! git diff --cached --quiet; then
+# `core.fileMode=false` ignora el bit de ejecución: un `chmod +x` no es un
+# cambio de código y bloquear el despliegue por eso es ruido que enseña a
+# saltarse la comprobación -- justo lo contrario de para lo que está.
+GIT="git -c core.fileMode=false"
+if ! $GIT diff --quiet || ! $GIT diff --cached --quiet; then
     rojo "Hay cambios locales sin commitear:"
-    git status --short
+    $GIT status --short
     rojo ""
     rojo "Editar en el servidor deja arreglos que nadie más puede ver y que"
     rojo "el próximo pull borra. Cómetelos y súbelos, o descártalos a"
