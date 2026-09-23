@@ -23,7 +23,6 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 import auth
-import correo as CO
 import entra
 import db
 import excel as X
@@ -70,14 +69,7 @@ def _cerrar() -> None:
 # =====================================================================
 
 # Lo único accesible sin sesión. Todo lo demás exige haber entrado.
-PUBLICAS = {"/auth/estado", "/auth/codigo", "/auth/verificar",
-            "/auth/microsoft"}
-
-# Con la cuenta a medio hacer -- buzon probado, datos sin llenar -- solo
-# se puede llegar a estas. No es una restriccion cosmetica: sin ella
-# alguien con un correo del dominio tendria acceso completo sin haber
-# dicho ni su nombre.
-SIN_REGISTRO = {"/auth/yo", "/auth/registro", "/auth/logout"}
+PUBLICAS = {"/auth/estado", "/auth/microsoft"}
 
 # Nombre legible de cada acción, derivado de la ruta. El registro se hace
 # solo, para todo método que escriba: si mañana se agrega un endpoint que
@@ -171,11 +163,6 @@ async def exigir_sesion(request: Request, call_next):
     if not u:
         return JSONResponse({"detail": "No autenticado"}, status_code=401)
 
-    if u["registrado_en"] is None and ruta not in SIN_REGISTRO:
-        return JSONResponse(
-            {"detail": "Complete su registro para continuar",
-             "registro_pendiente": True}, status_code=403)
-
     prohibido = _sin_acceso_al_encargo(u, ruta)
     if prohibido:
         return JSONResponse({"detail": prohibido}, status_code=403)
@@ -241,16 +228,10 @@ class LoginMicrosoft(BaseModel):
     id_token: str
 
 
-class PedirCodigo(BaseModel):
-    correo: str
-
-
-class VerificarCodigo(BaseModel):
-    correo: str
-    codigo: str
-
-
-class DatosRegistro(BaseModel):
+class DatosPerfil(BaseModel):
+    """Lo que la persona puede editar desde su menu. Nombre y datos de
+    firma (cargo, tarjeta profesional, telefono). El correo NO: es la
+    identidad, la fija Microsoft y no se cambia desde aqui."""
     nombre: str
     cargo: str | None = None
     tarjeta_profesional: str | None = None
@@ -273,23 +254,18 @@ def _perfil(u: dict) -> dict:
             "correo": u["correo"], "rol": u["rol"],
             "cargo": u.get("cargo"),
             "tarjeta_profesional": u.get("tarjeta_profesional"),
-            "telefono": u.get("telefono"),
-            "registro_pendiente": u["registrado_en"] is None}
+            "telefono": u.get("telefono")}
 
 
 @app.get("/auth/estado")
 def auth_estado() -> dict:
-    """Sin sesion. Dice el dominio con el que se entra y si el envio de
-    correo esta configurado: si no lo esta, mas vale decirlo en la
-    pantalla que dejar a la gente pidiendo codigos que no salen."""
-    sirve, falta = CO.configurado()
-    return {"dominio": auth.DOMINIO, "correo_listo": sirve,
-            "correo_problema": falta, "modo_correo": CO.modo(),
-            "largo_codigo": auth.LARGO_CODIGO,
-            "minutos_codigo": auth.MINUTOS_VIGENCIA_CODIGO,
-            # Datos del login con Microsoft. El id de aplicacion y el de
-            # inquilino no son secretos: se dan al frontend para que arme
-            # MSAL sin recompilar por cada firma o entorno.
+    """Lo que el frontend necesita para mostrar la pantalla de ingreso.
+
+    Sin sesion: el id de aplicacion y el de inquilino no son secretos, se
+    entregan al frontend para que arme MSAL sin recompilar por cada firma
+    o entorno.
+    """
+    return {"dominio": auth.DOMINIO,
             "msClientId": entra.cliente() or None,
             "msTenantId": entra.tenant() or None}
 
@@ -348,121 +324,14 @@ def login_microsoft(m: LoginMicrosoft, request: Request,
     return _perfil(u)
 
 
-@app.post("/auth/codigo")
-def pedir_codigo(c: PedirCodigo, request: Request) -> dict:
-    """Manda el codigo al buzon.
+@app.put("/auth/perfil")
+def actualizar_perfil(d: DatosPerfil, request: Request) -> dict:
+    """Actualiza los datos de firma: nombre, cargo, tarjeta, telefono.
 
-    Responde lo mismo exista la cuenta o no. Decir "ese correo no esta
-    registrado" convertiria esta pantalla en una forma de averiguar quien
-    trabaja en la firma, y no hace falta: si el correo es del dominio, la
-    persona tiene derecho a entrar -- la primera vez creandose la cuenta.
+    El nombre lo trae Microsoft al entrar por primera vez; esta ruta sirve
+    para corregirlo despues, o para llenar el resto -- cargo y tarjeta
+    profesional son los datos con los que se firma un dictamen.
     """
-    correo = auth.normalizar_correo(c.correo)
-    problema = auth.problema_con_correo(correo)
-    if problema:
-        raise HTTPException(422, problema)
-
-    desde = datetime.now(timezone.utc) - timedelta(
-        minutes=auth.MINUTOS_VENTANA_ENVIO)
-    if db.codigos_recientes(correo, desde) >= auth.MAX_CODIGOS_POR_VENTANA:
-        db.registrar(usuario=correo, accion="CODIGO_LIMITADO",
-                     entidad="usuario", exito=False, estado_http=429,
-                     detalle={"motivo": "demasiadas solicitudes"},
-                     ip=_ip(request), agente=request.headers.get("user-agent"))
-        raise HTTPException(
-            429, f"Ya se enviaron varios codigos a ese correo. Espere "
-                 f"{auth.MINUTOS_VENTANA_ENVIO} minutos o use el ultimo "
-                 f"que recibio.")
-
-    codigo = auth.nuevo_codigo()
-    expira = datetime.now(timezone.utc) + timedelta(
-        minutes=auth.MINUTOS_VIGENCIA_CODIGO)
-    fila = db.crear_codigo(correo, auth.hash_codigo(codigo), expira,
-                           _ip(request), request.headers.get("user-agent"))
-    try:
-        via = CO.enviar_codigo(correo, codigo, auth.MINUTOS_VIGENCIA_CODIGO)
-    except Exception as e:
-        # El codigo ya quedo creado y no lo recibio nadie: se BORRA, no se
-        # marca usado. Una fila usada sigue contando para el limite de
-        # envios, y quien reintenta porque el correo esta caido quedaria
-        # bloqueado quince minutos por codigos que nunca salieron de aqui.
-        db.borrar_codigo(fila["id"])
-        if isinstance(e, CO.CorreoNoConfigurado):
-            # Incluye CorreoNoAutorizado: el mensaje ya viene en castellano
-            # y dice que hacer, asi que se pasa tal cual.
-            raise HTTPException(503, str(e)) from None
-        # De un fallo cualquiera -- la red, Microsoft caido -- el detalle
-        # tecnico va al registro, no a la cara de quien intenta entrar.
-        db.registrar(usuario=correo, accion="CODIGO_FALLIDO",
-                     entidad="usuario", exito=False, estado_http=502,
-                     detalle={"error": str(e)[:500]}, ip=_ip(request),
-                     agente=request.headers.get("user-agent"))
-        raise HTTPException(
-            502, "No se pudo enviar el codigo. Intentelo de nuevo en un "
-                 "momento; si sigue fallando, avise al administrador."
-        ) from None
-
-    # El codigo NO entra a la bitacora. Si queda constancia del envio.
-    db.registrar(usuario=correo, accion="CODIGO_ENVIADO", entidad="usuario",
-                 detalle={"via": via, "vence": expira.isoformat()},
-                 ip=_ip(request), agente=request.headers.get("user-agent"))
-    return {"enviado": True, "minutos": auth.MINUTOS_VIGENCIA_CODIGO}
-
-
-@app.post("/auth/verificar")
-def verificar_codigo(c: VerificarCodigo, request: Request,
-                     response: Response) -> dict:
-    """Cambia el codigo por una sesion. Si es la primera vez, crea la
-    cuenta a medio hacer y el frontend pide los datos.
-
-    La cuenta se crea DESPUES de comprobar el codigo, nunca antes: asi
-    nadie puebla la tabla de usuarios escribiendo correos.
-    """
-    correo = auth.normalizar_correo(c.correo)
-    problema = auth.problema_con_correo(correo)
-    if problema:
-        raise HTTPException(422, problema)
-
-    def _fallo(motivo: str, http: int = 401) -> HTTPException:
-        db.registrar(usuario=correo, accion="INGRESO_FALLIDO",
-                     entidad="usuario", detalle={"motivo": motivo},
-                     exito=False, estado_http=http, ip=_ip(request),
-                     agente=request.headers.get("user-agent"))
-        return HTTPException(http, "El codigo no es correcto o ya vencio")
-
-    fila = db.codigo_vigente(correo)
-    if not fila:
-        raise _fallo("sin codigo pendiente")
-    if fila["expira_en"] <= datetime.now(timezone.utc):
-        raise _fallo("codigo vencido")
-    if fila["intentos"] >= auth.MAX_INTENTOS_CODIGO:
-        db.consumir_codigo(fila["id"])
-        raise _fallo("codigo agotado por intentos", 429)
-    if not auth.verificar_codigo((c.codigo or "").strip(), fila["codigo_hash"]):
-        quedan = auth.MAX_INTENTOS_CODIGO - db.sumar_intento(fila["id"])
-        raise _fallo(f"codigo incorrecto (quedan {max(quedan, 0)} intentos)")
-
-    db.consumir_codigo(fila["id"])
-
-    u = db.usuario_por_correo(correo)
-    if u and not u["activo"]:
-        raise _fallo("cuenta desactivada", 403)
-    nuevo = u is None
-    if nuevo:
-        u = db.crear_usuario_por_correo(correo, correo.split("@")[0])
-
-    _sesion_nueva(u, request, response)
-    db.actualizar_usuario(u["id"], ultimo_acceso=datetime.now(timezone.utc))
-    db.registrar(usuario_id=u["id"], usuario=u["usuario"],
-                 accion="CUENTA_CREADA" if nuevo else "INGRESO",
-                 entidad="usuario", ip=_ip(request),
-                 agente=request.headers.get("user-agent"))
-    return _perfil(u)
-
-
-@app.put("/auth/registro")
-def completar_registro(d: DatosRegistro, request: Request) -> dict:
-    """Los datos que la persona llena la primera vez."""
     u = _yo(request)
     nombre = (d.nombre or "").strip()
     if len(nombre.split()) < 2:
@@ -474,8 +343,6 @@ def completar_registro(d: DatosRegistro, request: Request) -> dict:
         "tarjeta_profesional": (d.tarjeta_profesional or "").strip() or None,
         "telefono": (d.telefono or "").strip() or None,
     }
-    if u["registrado_en"] is None:
-        campos["registrado_en"] = datetime.now(timezone.utc)
     actualizado = db.actualizar_usuario(u["id"], **campos)
     request.state.bitacora = {"nombre": nombre, "cargo": campos["cargo"]}
     return _perfil(actualizado)

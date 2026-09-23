@@ -7,7 +7,6 @@ import Usuarios from "./vistas/Usuarios";
 import Bitacora from "./vistas/Bitacora";
 import { Anillo } from "./comp/Piezas";
 import MenuUsuario from "./comp/MenuUsuario";
-import Registro from "./comp/Registro";
 
 export default function App() {
   const [yo, setYo] = useState(null);
@@ -39,13 +38,6 @@ export default function App() {
 
   if (verificando) return null;              // evita el parpadeo del login
   if (!yo) return <Login onEntrar={setYo} />;
-
-  /* Buzón probado pero datos sin llenar. Se muestra el formulario y nada
-     más: el servidor rechaza el resto de la aplicación en ese estado, así
-     que dejar ver el fondo solo prometería algo que no responde. */
-  if (yo.registro_pendiente) {
-    return <Registro correo={yo.correo} onListo={setYo} />;
-  }
 
   return (
     <>

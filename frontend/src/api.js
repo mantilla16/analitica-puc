@@ -31,10 +31,7 @@ export const api = {
   // ------------------------------------------------------------ sesión
   estadoAuth: () => pedir("/auth/estado"),
   loginMicrosoft: (id_token) => pedir("/auth/microsoft", json("POST", { id_token })),
-  pedirCodigo: (correo) => pedir("/auth/codigo", json("POST", { correo })),
-  verificarCodigo: (correo, codigo) =>
-    pedir("/auth/verificar", json("POST", { correo, codigo })),
-  registrarme: (d) => pedir("/auth/registro", json("PUT", d)),
+  actualizarPerfil: (d) => pedir("/auth/perfil", json("PUT", d)),
   logout: () => pedir("/auth/logout", { method: "POST" }),
   yo: () => pedir("/auth/yo"),
 

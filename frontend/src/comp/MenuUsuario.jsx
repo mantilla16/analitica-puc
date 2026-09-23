@@ -147,7 +147,7 @@ function MisDatos({ yo, onCerrar }) {
     setError(null);
     setOcupado(true);
     try {
-      await api.registrarme(d);
+      await api.actualizarPerfil(d);
       setListo(true);
     } catch (err) {
       setError(err.detalle ?? err.message);
