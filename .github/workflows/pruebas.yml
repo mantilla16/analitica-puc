@@ -1,0 +1,63 @@
+# Pruebas en cada push. No toca el servidor: corre entero en GitHub, así
+# que Tailscale no interviene para nada.
+#
+# Lo que se comprueba es lo que se puede comprobar sin la base de datos:
+# que el código no tenga nombres rotos, que el lector de archivos siga
+# leyendo bien, y que el frontend compile. `validar_motor.py` no está aquí
+# a propósito -- valida las reglas contables contra balances reales de
+# clientes, y esos datos no pueden salir del servidor.
+name: Pruebas
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:        # para poder lanzarlas a mano desde la web
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # La misma que el servidor. Probar con otra versión daría una luz
+          # verde que no significa nada sobre lo que va a correr de verdad.
+          python-version: "3.14"
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyflakes
+
+      - name: Nombres rotos, imports que no existen
+        # Lo que atrapa el error que JavaScript no avisa y Python solo
+        # avisa al ejecutar la línea: una función que se borró y alguien
+        # sigue llamando.
+        run: python -m pyflakes *.py
+
+      - name: Lectura de archivos
+        run: python validar_excel.py
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Instalar
+        working-directory: frontend
+        # `npm ci` y no `npm install`: respeta el package-lock en vez de
+        # reescribirlo. Es la diferencia entre construir lo que está en el
+        # repositorio y construir lo que npm decida hoy.
+        run: npm ci
+
+      - name: Construir
+        working-directory: frontend
+        run: npm run build

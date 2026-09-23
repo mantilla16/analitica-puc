@@ -1,0 +1,53 @@
+# Despliegue al servidor de la oficina.
+#
+# El servidor está en una tailnet y no se expone a internet. No hace falta:
+# este trabajo corre en un runner instalado EN el propio servidor, que se
+# conecta HACIA GitHub por salida, igual que hace `git pull`. No hay puerto
+# que abrir ni credencial de Tailscale que guardar en GitHub.
+#
+# Instalación del runner (una vez, en el servidor):
+#
+#   1. En GitHub: Settings -> Actions -> Runners -> New self-hosted runner
+#      -> Linux x64, y seguir los comandos que muestra la página.
+#   2. Instalarlo como servicio para que sobreviva a los reinicios:
+#        cd ~/actions-runner && sudo ./svc.sh install rbbaq && sudo ./svc.sh start
+#      El usuario importa: tiene que ser el dueño de ~/analitica-puc.
+#   3. Permitir el reinicio del servicio sin contraseña, y SOLO ese comando:
+#        echo 'rbbaq ALL=(root) NOPASSWD: /usr/bin/systemctl restart analitica-puc, /usr/sbin/nginx -T' \
+#          | sudo tee /etc/sudoers.d/analitica-despliegue
+#        sudo chmod 440 /etc/sudoers.d/analitica-despliegue
+#
+# ADVERTENCIA que conviene leer antes de instalarlo: un runner en el propio
+# servidor ejecuta el código del repositorio con el usuario que lo corre.
+# Mientras el repositorio sea privado y solo escriba gente de la firma, es
+# aceptable. Si algún día se hace público, o se aceptan pull requests de
+# fuera, hay que quitarlo: cualquiera podría ejecutar lo que quisiera en el
+# servidor con solo abrir un PR.
+name: Desplegar
+
+on:
+  workflow_dispatch:        # a mano, desde la pestaña Actions
+  # Descomentar para desplegar solo cuando las pruebas hayan pasado:
+  # workflow_run:
+  #   workflows: [Pruebas]
+  #   types: [completed]
+  #   branches: [main]
+
+concurrency:
+  # Dos despliegues a la vez dejarían el servidor a medio camino entre dos
+  # versiones. El segundo espera; no se cancela, porque cancelar a mitad de
+  # un `npm ci` deja el frontend sin construir.
+  group: despliegue
+  cancel-in-progress: false
+
+jobs:
+  desplegar:
+    runs-on: self-hosted
+    steps:
+      - name: Desplegar y comprobar que respondió
+        # No se hace checkout: el script trabaja sobre el clon de trabajo
+        # del servidor, que es el que nginx sirve y systemd ejecuta.
+        run: |
+          cd ~/analitica-puc
+          chmod +x desplegar.sh
+          ./desplegar.sh

@@ -1,0 +1,9 @@
+# Los finales de línea los decide el repositorio, no el sistema de quien
+# clona. Sin esto, git convierte a CRLF en Windows y un script que se subió
+# desde aquí falla en el servidor con `bad interpreter: /usr/bin/env bash^M`
+# -- un error que no se parece en nada a su causa.
+*.sh   text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.py   text eol=lf
+*.sql  text eol=lf
