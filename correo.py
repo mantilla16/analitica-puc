@@ -74,6 +74,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
+from email.utils import formatdate, make_msgid
 
 log = logging.getLogger("analitica.correo")
 
@@ -223,9 +224,20 @@ def enviar_codigo(correo: str, codigo: str, minutos: int) -> str:
     msg["Subject"] = ASUNTO
     msg["From"] = f"{nombre_de} <{direccion_de}>"
     msg["To"] = correo
+    # Message-ID y Date explicitos, con el dominio del remitente. Python los
+    # agrega solo si faltan, pero cuando se entrega directo al MX de
+    # Microsoft (modo RELAY) un correo SIN estas cabeceras se ve robotico y
+    # algunos filtros lo mandan a cuarentena. Con el dominio propio en el
+    # Message-ID, el clasificador ve un correo que se identifica.
+    dominio = direccion_de.split("@", 1)[-1] if "@" in direccion_de else "rbcol.co"
+    msg["Message-ID"] = make_msgid(domain=dominio)
+    msg["Date"] = formatdate(localtime=True)
     # Que un cliente de correo no ofrezca "responder a todos" sobre un
     # mensaje automático: no hay nadie leyendo esa bandeja.
     msg["Auto-Submitted"] = "auto-generated"
+    # X-Auto-Response-Suppress evita que un "fuera de la oficina" responda
+    # a este mensaje. No cambia entregabilidad, evita ruido innecesario.
+    msg["X-Auto-Response-Suppress"] = "All"
     msg.set_content(texto)
     msg.add_alternative(html, subtype="html")
 
