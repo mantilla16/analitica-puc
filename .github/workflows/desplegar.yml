@@ -27,11 +27,15 @@ name: Desplegar
 
 on:
   workflow_dispatch:        # a mano, desde la pestaña Actions
-  # Descomentar para desplegar solo cuando las pruebas hayan pasado:
-  # workflow_run:
-  #   workflows: [Pruebas]
-  #   types: [completed]
-  #   branches: [main]
+  # Automatico despues de cada push a main, PERO solo si las pruebas
+  # pasaron. `workflow_run` se dispara siempre que Pruebas termine
+  # (aunque falle), asi que abajo el paso comprueba `conclusion` y sale
+  # sin hacer nada cuando fallaron. Es la manera de encadenar sin
+  # desplegar codigo que no compila.
+  workflow_run:
+    workflows: [Pruebas]
+    types: [completed]
+    branches: [main]
 
 concurrency:
   # Dos despliegues a la vez dejarían el servidor a medio camino entre dos
@@ -43,6 +47,10 @@ concurrency:
 jobs:
   desplegar:
     runs-on: self-hosted
+    # Si vino por workflow_run y las pruebas fallaron, no se despliega.
+    # Un `if` que salga silenciosamente es mejor que un despliegue que
+    # publica codigo roto.
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     steps:
       - name: Desplegar y comprobar que respondió
         # No se hace checkout: el script trabaja sobre el clon de trabajo
