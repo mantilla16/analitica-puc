@@ -51,6 +51,7 @@ export default function Encargos({ yo, onAbrir }) {
     setEditando(enc);
     setChoque(null);
     setEd({
+      nit: enc.nit ?? "",
       razon_social: enc.razon_social ?? "",
       responsable: enc.creado_por ?? "",
       estado: enc.estado ?? "ABIERTO",
@@ -87,6 +88,7 @@ export default function Encargos({ yo, onAbrir }) {
         await api.reasignarEncargo(editando.id, ed.responsable);
       }
       await api.editarEncargo(editando.id, {
+        nit: ed.nit,
         razon_social: ed.razon_social,
         estado: ed.estado,
         fecha_corte: ed.fecha_corte,
@@ -290,15 +292,24 @@ export default function Encargos({ yo, onAbrir }) {
           )}
 
           <div className="space-y-4">
-            <label className="block">
-              <span className="rotulo">Razón social</span>
-              <input value={ed.razon_social}
-                     onChange={(e) => setEd({ ...ed, razon_social: e.target.value })}
-                     className="mt-1.5 w-full px-3 py-2 text-sm" />
-              <span className="mt-1 block text-xs text-tinta-suave">
-                Es del cliente: cambia en todos sus encargos.
-              </span>
-            </label>
+            <div className="grid gap-4 sm:grid-cols-[1fr_2fr]">
+              <label className="block">
+                <span className="rotulo">NIT</span>
+                <input value={ed.nit}
+                       onChange={(e) => setEd({ ...ed, nit: e.target.value })}
+                       placeholder="901228343-1"
+                       className="cifra mt-1.5 w-full px-3 py-2 text-sm" />
+              </label>
+              <label className="block">
+                <span className="rotulo">Razón social</span>
+                <input value={ed.razon_social}
+                       onChange={(e) => setEd({ ...ed, razon_social: e.target.value })}
+                       className="mt-1.5 w-full px-3 py-2 text-sm" />
+              </label>
+            </div>
+            <p className="-mt-1 text-xs text-tinta-suave">
+              NIT y razón social son del cliente: cambian en todos sus encargos.
+            </p>
 
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="block">
@@ -362,7 +373,7 @@ export default function Encargos({ yo, onAbrir }) {
               </button>
             ) : (
               <Boton onClick={() => guardarEdicion(false)}
-                     disabled={!ed.razon_social.trim() || !ed.fecha_corte}>
+                     disabled={!ed.nit.trim() || !ed.razon_social.trim() || !ed.fecha_corte}>
                 Guardar
               </Boton>
             )}

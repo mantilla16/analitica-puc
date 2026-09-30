@@ -284,9 +284,15 @@ def actualizar_encargo(encargo_id: str, **campos: Any) -> dict | None:
                (*campos.values(), encargo_id))
 
 
-def actualizar_cliente(cliente_id: str, razon_social: str) -> None:
-    ejecutar("UPDATE core.cliente SET razon_social=%s WHERE id=%s",
-             (razon_social, cliente_id))
+def actualizar_cliente(cliente_id: str, **campos) -> None:
+    """Cambia razon_social y/o nit del cliente. El NIT es UNIQUE: la
+    validacion de choque con otro cliente se hace en la capa superior."""
+    campos = {k: v for k, v in campos.items() if v is not None}
+    if not campos:
+        return
+    sets = ", ".join(f"{k}=%s" for k in campos)
+    ejecutar(f"UPDATE core.cliente SET {sets} WHERE id=%s",
+             (*campos.values(), cliente_id))
 
 
 def insumos_con_periodo(encargo_id: str) -> list[dict]:

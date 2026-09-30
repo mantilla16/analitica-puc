@@ -483,6 +483,7 @@ class EncargoCambio(BaseModel):
     ese cambio se rechaza en vez de aplicarse en silencio.
     """
     razon_social: str | None = None
+    nit: str | None = None
     fecha_corte: date | None = None
     fecha_cierre_anterior: date | None = None
     fecha_corte_anterior: date | None = None
@@ -631,7 +632,18 @@ def editar_encargo(encargo_id: str, c: EncargoCambio, request: Request) -> dict:
 
     razon = (c.razon_social or "").strip()
     cambia_razon = bool(razon) and razon != enc["razon_social"]
-    if not campos and not cambia_razon:
+
+    nit = (c.nit or "").strip()
+    cambia_nit = bool(nit) and nit != enc["nit"]
+    if cambia_nit:
+        # El NIT identifica al cliente en toda la base: si ya es de otro,
+        # cambiarlo mezclaria historias y hallazgos de dos clientes.
+        otro = db.cliente_por_nit(nit)
+        if otro and str(otro["id"]) != str(enc["cliente_id"]):
+            raise HTTPException(
+                409, f"Ese NIT ya es de {otro['razon_social']}.")
+
+    if not campos and not cambia_razon and not cambia_nit:
         return {**enc, "sin_cambios": True}
 
     fechas = {k: campos.get(k, enc[k]) for k in
@@ -657,8 +669,12 @@ def editar_encargo(encargo_id: str, c: EncargoCambio, request: Request) -> dict:
                 for m in malos],
         })
 
-    if cambia_razon:
-        db.actualizar_cliente(str(enc["cliente_id"]), razon)
+    if cambia_razon or cambia_nit:
+        db.actualizar_cliente(
+            str(enc["cliente_id"]),
+            razon_social=razon if cambia_razon else None,
+            nit=nit if cambia_nit else None,
+        )
     if campos:
         db.actualizar_encargo(encargo_id, **campos)
 
@@ -676,8 +692,10 @@ def editar_encargo(encargo_id: str, c: EncargoCambio, request: Request) -> dict:
 
     request.state.bitacora = {
         "razon_social": razon or enc["razon_social"],
+        "nit": nit or enc["nit"],
         "cambios": {k: str(v) for k, v in campos.items()},
         "razon_social_cambiada": cambia_razon,
+        "nit_cambiado": cambia_nit,
         "desalineados": [m["tipo"] for m in malos],
     }
     return {**db.encargo(encargo_id), "desalineados": [m["tipo"] for m in malos]}
