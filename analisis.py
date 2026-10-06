@@ -383,28 +383,59 @@ def _auxiliares_variacion(act_id: str, comparativo_id: str, codigo: str,
 
     El porcentaje de la variación total se calcula aquí, no por el modelo
     -- así puede citarlo como una cifra más del JSON, verificable, en vez
-    de tener que sacar la cuenta él mismo."""
-    def _saldos(carga_id: str | None) -> dict[str, dict]:
+    de tener que sacar la cuenta él mismo.
+
+    El nivel se elige por cuenta y tiene que estar COMPLETO en las dos
+    cargas: sus filas bajo esta cuenta deben sumar el saldo de la cuenta.
+    Antes se tomaba el nivel más profundo de cada archivo, por separado. Al
+    balance de mayo 2026 de un cliente se le coló UNA cuenta de 9 dígitos
+    (135518100) entre las de 8 y 10: ese archivo pasó a tener "9" como nivel
+    más granular, el comparativo seguía en 8, y cada auxiliar salía con
+    saldo actual cero y variación igual a todo su saldo anterior. La 3710,
+    que no se movió un peso, mostraba una variación de 1.004.507.366 en su
+    auxiliar, y la IA la redactaba como hecho. Que el nivel cuadre con la
+    cuenta en los dos lados es lo que garantiza que se comparan los mismos
+    códigos, y se comprueba en vez de suponerse.
+    """
+    def _filas(carga_id: str | None) -> tuple[dict[str, dict], Decimal]:
         if not carga_id:
-            return {}
+            return {}, Decimal(0)
+        # Misma base que la cuenta: el porcentaje es var/variacion_cuenta,
+        # y con bases de signo distinto el cociente saldria invertido.
         filas = db.varios(
-            # El nivel más granular de ESTE archivo, no el nombre 'Auxiliar':
-            # unos ERP bajan a 8 dígitos y otros a 9, y con el nombre fijo el
-            # desglose salía vacío para los segundos sin decir por qué.
-            # Misma base que la cuenta: el porcentaje es var/variacion_cuenta,
-            # y con bases de signo distinto el cociente saldria invertido.
-            """SELECT codigo_puc, nombre_cuenta,
+            """SELECT codigo_puc, nombre_cuenta, digitos,
                       coalesce(saldo_naturaleza, saldo_natural) AS saldo_natural
                FROM core.balance
                WHERE carga_id=%s AND left(codigo_puc,%s)=%s
-                 AND digitos = (SELECT max(digitos) FROM core.balance
-                                 WHERE carga_id=%s)""",
-            (carga_id, len(codigo), codigo, carga_id),
+                 AND digitos >= %s""",
+            (carga_id, len(codigo), codigo, len(codigo)),
         )
-        return {f["codigo_puc"]: f for f in filas}
+        propia = next((f for f in filas if f["codigo_puc"] == codigo), None)
+        total = Decimal(propia["saldo_natural"]) if propia else Decimal(0)
+        return ({f["codigo_puc"]: f for f in filas
+                 if f["digitos"] > len(codigo)}, total)
 
-    act = _saldos(act_id)
-    comp = _saldos(comparativo_id)
+    todas_act, total_act = _filas(act_id)
+    todas_comp, total_comp = _filas(comparativo_id)
+
+    def _completo(filas: dict[str, dict], total: Decimal, d: int) -> bool:
+        suma = sum((Decimal(f["saldo_natural"]) for f in filas.values()
+                    if f["digitos"] == d), Decimal(0))
+        return abs(suma - total) <= Decimal("1.00")
+
+    niveles = sorted({f["digitos"] for f in todas_act.values()}
+                     | {f["digitos"] for f in todas_comp.values()},
+                     reverse=True)
+    nivel = next((d for d in niveles
+                  if _completo(todas_act, total_act, d)
+                  and _completo(todas_comp, total_comp, d)), None)
+    if nivel is None:
+        # Ningún nivel reconstruye la cuenta en los dos cortes: mostrar un
+        # desglose sería inventar de dónde viene la variación.
+        return []
+
+    act = {k: f for k, f in todas_act.items() if f["digitos"] == nivel}
+    comp = {k: f for k, f in todas_comp.items() if f["digitos"] == nivel}
 
     crudas = []
     for cod in set(act) | set(comp):
