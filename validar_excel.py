@@ -15,7 +15,9 @@ vuelva a ocurrir en silencio, que es la única forma en que ocurrieron:
   · un ERP que reparte un mismo corte en varias hojas y solo se leía una;
   · dos columnas con el mismo rótulo, donde ganaba la última sin avisar;
   · una columna con datos y sin rótulo, que desaparecía del mapeo;
-  · un archivo que declara mal su propio ancho y llegaba con una columna.
+  · un archivo que declara mal su propio ancho y llegaba con una columna;
+  · un auxiliar con filas de total por nivel que entraban como movimientos;
+  · un exporte cortado en un tope de filas que pasaba por completo.
 """
 from __future__ import annotations
 
@@ -111,6 +113,102 @@ def archivo_con_columna_sin_rotulo() -> str:
     ws.append(["1", "ACTIVO", 100, 10, 5, 105])
     ws.append(["11", "DISPONIBLE", 50, 5, 2, 53])
     return _guardar(wb, "sin_rotulo.xlsx")
+
+
+def archivo_con_filas_de_total() -> str:
+    """El auxiliar de SAP Business One, tal como lo exporta.
+
+    Antes del detalle de cada cuenta va una fila por nivel del árbol y otra
+    por tercero, con los débitos y créditos ACUMULADOS y sin fecha ni
+    asiento. El código es puro dígito: nada en él dice que es un total.
+    """
+    wb = Workbook(); ws = wb.active; ws.title = "Hoja 1"
+    ws.append(MOV)
+    # nivel por nivel, todos con el acumulado de la caja
+    for cod in ("1105", "110505", "11050501", "1105050101"):
+        ws.append([None, None, None, cod, "CAJA", None, None, None, 700, 200])
+    ws.append([None, None, None, "1105050101", "CAJA", "900123456",
+               "TERCERO SA", None, 700, 200])               # total por tercero
+    ws.append(["13/02/2026", "1001", "1", "1105050101", "CAJA",
+               "900123456", "TERCERO SA", "recarga", 500, 0])
+    ws.append(["13/02/2026", "1002", "1", "1105050101", "CAJA",
+               "900123456", "TERCERO SA", "reverso", 200, 200])
+    # una cuenta sin un solo movimiento: solo trae sus totales
+    for cod in ("3710", "371005", "37100505", "3710050501"):
+        ws.append([None, None, None, cod, "PERDIDAS", None, None, None, 0, 0])
+    # fecha que no se entiende, pero con documento: sigue siendo movimiento
+    ws.append(["fecha rara", "1003", "1", "1105050101", "CAJA",
+               None, None, "ajuste", 0, 0])
+    return _guardar(wb, "filas_de_total.xlsx")
+
+
+# =====================================================================
+# FILAS DE TOTAL INTERCALADAS EN EL MOVIMIENTO
+# =====================================================================
+
+def validar_filas_de_total() -> None:
+    ruta = archivo_con_filas_de_total()
+    informe: dict = {}
+    filas = list(X.parsear(ruta, {"hojas": ["Hoja 1"],
+                                  "formato_fecha": "DD/MM/YYYY",
+                                  "columnas": COLS_MOV},
+                           "MOVIMIENTO", informe))
+
+    caso("filas de total · solo entran los movimientos",
+         ["1001", "1002", "1003"], [f["num_doc"] for f in filas],
+         "una fila sin fecha ni documento es un acumulado del ERP")
+    caso("filas de total · los débitos de la caja no se multiplican",
+         700, sum(float(f["debito"]) for f in filas),
+         "con los totales adentro salían 4.200: seis veces lo real")
+    caso("filas de total · una cuenta sin actividad queda sin movimientos",
+         0, sum(1 for f in filas if f["codigo_puc"].startswith("3710")))
+    caso("filas de total · lo que se dejó fuera se cuenta",
+         9, informe["filas_resumen"])
+
+    # El balance no tiene fecha ni documento por naturaleza: no se toca.
+    bal = list(X.parsear(ruta, {"hojas": ["Hoja 1"],
+                                "formato_fecha": "DD/MM/YYYY",
+                                "columnas": {"codigo_puc": "Cuenta",
+                                             "debito": "Debitos",
+                                             "credito": "Creditos"}},
+                         "BALANCE"))
+    caso("filas de total · el balance no se filtra", 12, len(bal))
+
+
+def validar_exporte_cortado() -> None:
+    caso("exporte cortado · 100.000 filas de datos es un tope",
+         True, X.posible_corte({"filas_datos": 100_000, "ultima_fila": 100_001}),
+         "SAP B1 parte ahí el auxiliar en varias hojas")
+
+    llena = {"fila_encabezado": 1, "ultima_fila": 100_001, "filas_datos": 100_000}
+    resto = {"fila_encabezado": 1, "ultima_fila": 74_886, "filas_datos": 74_885}
+    tres = ["Hoja 1", "Hoja 2", "Hoja 3"]
+
+    caso("exporte partido · leídas las tres hojas, no hay aviso",
+         [], X.cortes({"hojas_archivo": tres, "filas_por_hoja":
+                       {"Hoja 1": llena, "Hoja 2": llena, "Hoja 3": resto}}),
+         "avisar sobre un archivo completo enseña a ignorar el aviso")
+    caso("exporte partido · leída solo la primera, se dice qué falta",
+         [("CONTINUA_SIN_LEER", ["Hoja 2", "Hoja 3"])],
+         [(k["tipo"], k["sin_leer"]) for k in X.cortes(
+             {"hojas_archivo": tres, "filas_por_hoja": {"Hoja 1": llena}})],
+         "el perfil que nombra solo 'Hoja 1' se queda con un tercio del periodo")
+    caso("exporte cortado · la última hoja llena es un corte de verdad",
+         [("CORTADO", [])],
+         [(k["tipo"], k["sin_leer"]) for k in X.cortes(
+             {"hojas_archivo": ["Hoja 1"], "filas_por_hoja": {"Hoja 1": llena}})])
+    caso("exporte cortado · un número cualquiera no lo es",
+         False, X.posible_corte({"filas_datos": 657_556, "ultima_fila": 657_557}))
+    caso("exporte cortado · la última fila de Excel también lo es",
+         True, X.posible_corte({"filas_datos": 1_048_575, "ultima_fila": 1_048_576}))
+
+    informe: dict = {}
+    list(X.parsear(archivo_con_filas_de_total(),
+                   {"hojas": ["Hoja 1"], "formato_fecha": "DD/MM/YYYY",
+                    "columnas": COLS_MOV}, "MOVIMIENTO", informe))
+    caso("exporte cortado · el lector dice dónde terminó cada hoja",
+         {"fila_encabezado": 1, "ultima_fila": 13, "filas_datos": 12},
+         informe["filas_por_hoja"]["Hoja 1"])
 
 
 # =====================================================================
@@ -244,6 +342,8 @@ def main() -> int:
     validar_rotulos_repetidos()
     validar_columna_sin_rotulo()
     validar_dimension_mal_declarada()
+    validar_filas_de_total()
+    validar_exporte_cortado()
 
     fallan = [r for r in resultados if not r[0]]
     for ok, nombre, nota in resultados:

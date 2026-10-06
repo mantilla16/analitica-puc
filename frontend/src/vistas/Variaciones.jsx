@@ -616,9 +616,13 @@ function Evidencia({ e, onCerrar }) {
                     </span>
                   </p>
                   <p className="text-xs text-tinta-suave">
-                    {entero(c.movimientos)} movimientos del periodo.
+                    {Number(c.movimientos) === 0
+                      ? "La cuenta no tiene movimientos en el archivo cargado."
+                      : `${entero(c.movimientos)} movimientos del periodo.`}
                     {c.cuadra
-                      ? " La cifra se reconstruye con los movimientos cargados."
+                      ? (Number(c.movimientos) === 0
+                          ? " Sin actividad y sin variación: es consistente."
+                          : " La cifra se reconstruye con los movimientos cargados.")
                       : " Revise antes de sostener cualquier explicación sobre esta cuenta."}
                   </p>
                 </div>

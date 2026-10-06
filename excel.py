@@ -401,6 +401,61 @@ def _descartable(codigo: Any) -> bool:
 
 NUMERICOS = {"saldo_inicial", "debito", "credito", "saldo_final"}
 
+# Lo que identifica una línea de movimiento: cuándo se registró y en qué
+# documento. Una fila que no trae NINGUNO de los dos no es un movimiento.
+#
+# El auxiliar de SAP Business One intercala, antes del detalle de
+# cada cuenta, una fila por cada nivel del árbol (3710, 371005, 37100505,
+# 3710050501) y otra por tercero, con el saldo y los débitos/créditos
+# ACUMULADOS de lo que cuelga debajo. El código es puro dígito, así que
+# `_descartable` las dejaba pasar, y cada una entraba como un movimiento más:
+# la caja salía con seis veces sus débitos reales, y una cuenta sin actividad
+# mostraba "6 movimientos" sin fecha ni documento.
+CAMPOS_DE_MOVIMIENTO = ("fecha", "num_doc")
+
+# Topes de filas a los que cortan los exportes. Una hoja que llega con
+# exactamente uno de estos números casi nunca es casualidad: el ERP dejó de
+# escribir ahí. Lo que sigue puede estar en la hoja siguiente -- SAP B1 parte
+# el auxiliar de un cliente en Hoja 1, 2 y 3 de 100.000 filas cada una -- o
+# no haber llegado nunca.
+TOPES_DE_EXPORTE = {65_535, 65_536, 100_000, 1_048_575, 1_048_576}
+
+
+def _vacia(v: Any) -> bool:
+    return v is None or not str(v).strip()
+
+
+def posible_corte(hoja: dict) -> bool:
+    """¿Esta hoja termina justo en un tope de exporte?"""
+    return (hoja["filas_datos"] in TOPES_DE_EXPORTE
+            or hoja["ultima_fila"] in TOPES_DE_EXPORTE)
+
+
+def cortes(informe: dict) -> list[dict]:
+    """Hojas que terminan en un tope y cuya continuación no se leyó.
+
+    Una hoja llena seguida de otra que SÍ se leyó es un exporte partido, y
+    está completo: avisar ahí enseña a ignorar el aviso. Lo que se reporta:
+
+      · CONTINUA_SIN_LEER -- después vienen hojas del archivo que el perfil
+        no leyó. Es el riesgo real: un perfil que nombra solo "Hoja 1" se
+        queda con el primer tercio del periodo sin que nada lo diga.
+      · CORTADO -- es la última hoja del archivo. Lo que seguía no está.
+    """
+    leidas = informe.get("filas_por_hoja", {})
+    todas = informe.get("hojas_archivo") or list(leidas)
+    out = []
+    for hoja, h in leidas.items():
+        if not posible_corte(h) or hoja not in todas:
+            continue
+        despues = todas[todas.index(hoja) + 1:]
+        if any(d in leidas for d in despues):
+            continue
+        out.append({"hoja": hoja, **h,
+                    "tipo": "CONTINUA_SIN_LEER" if despues else "CORTADO",
+                    "sin_leer": despues})
+    return out
+
 
 def hojas_del_perfil(perfil: dict) -> list[str]:
     """Las hojas que el perfil manda leer, en orden.
@@ -417,8 +472,14 @@ def hojas_del_perfil(perfil: dict) -> list[str]:
     return [una] if una else []
 
 
-def parsear(ruta: str | Path, perfil: dict, naturaleza: str) -> Iterator[dict]:
+def parsear(ruta: str | Path, perfil: dict, naturaleza: str,
+            informe: dict | None = None) -> Iterator[dict]:
     """Genera filas normalizadas. No carga el archivo entero en memoria.
+
+    Si se pasa `informe`, al terminar trae lo que se dejó fuera y por qué:
+    `filas_resumen` (líneas de total en un movimiento) y `filas_por_hoja`
+    (filas de datos leídas en cada hoja, para detectar un exporte cortado).
+    Lo que no entra se cuenta, no se calla.
 
     Cuando el perfil nombra varias hojas se leen TODAS y sus filas salen
     encadenadas, cada una marcada con su hoja de origen. Es el caso del ERP
@@ -431,12 +492,17 @@ def parsear(ruta: str | Path, perfil: dict, naturaleza: str) -> Iterator[dict]:
     tentador saltarla y seguir, pero eso es exactamente perder datos en
     silencio: mejor que falle y alguien mire.
     """
+    if informe is None:
+        informe = {}
+    informe.update(filas_resumen=0, filas_por_hoja={})
+
     columnas = perfil["columnas"]
     pedidas = hojas_del_perfil(perfil)
     ignorar = {norm(h) for h in perfil.get("ignorar_hojas", [])}
     fmt_fecha = perfil.get("formato_fecha", "DD/MM/YYYY")
 
     wb = load_workbook(ruta, read_only=True, data_only=True)
+    informe["hojas_archivo"] = list(wb.sheetnames)
     try:
         if pedidas:
             faltan = [h for h in pedidas if h not in wb.sheetnames]
@@ -468,14 +534,26 @@ def parsear(ruta: str | Path, perfil: dict, naturaleza: str) -> Iterator[dict]:
                 continue          # hoja auxiliar sin los encabezados esperados
 
             n_col = max(idx.values()) + 1 if idx else 0
+            identifican = [idx[c] for c in CAMPOS_DE_MOVIMIENTO if c in idx] \
+                if naturaleza == "MOVIMIENTO" else []
+            ultima = fila_enc
 
             for n, fila in enumerate(_filas(ws, min_row=fila_enc + 1),
                                      start=fila_enc + 1):
                 if not fila:
                     continue
                 fila = tuple(fila) + (None,) * (n_col - len(fila))
+                if any(not _vacia(v) for v in fila):
+                    ultima = n
 
                 if "codigo_puc" in idx and _descartable(fila[idx["codigo_puc"]]):
+                    continue
+
+                # Se mira la celda cruda, no la fecha ya interpretada: una
+                # fecha en un formato que no se entiende no convierte la
+                # línea en un total.
+                if identifican and all(_vacia(fila[j]) for j in identifican):
+                    informe["filas_resumen"] += 1
                     continue
 
                 out: dict[str, Any] = {"fila_origen": n, "hoja": nombre}
@@ -491,5 +569,10 @@ def parsear(ruta: str | Path, perfil: dict, naturaleza: str) -> Iterator[dict]:
                         out[campo] = None if v is None else str(v).strip()
 
                 yield out
+
+            informe["filas_por_hoja"][nombre] = {
+                "fila_encabezado": fila_enc, "ultima_fila": ultima,
+                "filas_datos": ultima - fila_enc,
+            }
     finally:
         wb.close()

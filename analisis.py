@@ -599,7 +599,12 @@ def _cuadre_movimientos(fila: dict, totales: dict | None, signo: int) -> dict | 
         corte del año pasado. Los movimientos del año en curso explican
         el SALDO ACTUAL, no la diferencia contra el año anterior.
     """
-    if not totales or not totales.get("n"):
+    # Sin archivo de movimientos no hay contra qué contrastar. Con archivo y
+    # cero líneas para la cuenta SÍ hay respuesta: neto cero. Si la cifra
+    # también es cero, cuadra; si no, faltan movimientos -- que es justo lo
+    # que pasa con las cuentas que quedaron después del corte de un exporte
+    # truncado, y callarlo las dejaba pasar por "sin datos".
+    if not totales:
         return None
 
     neto = (Decimal(totales["debito"]) - Decimal(totales["credito"])) * signo

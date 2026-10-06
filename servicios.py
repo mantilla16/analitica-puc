@@ -160,11 +160,45 @@ def procesar(carga_id: str) -> dict:
                     (c["perfil_id"],))["mapeo"]
     nat = c["naturaleza"]
 
+    informe: dict = {}
     filas = R.marcar_huellas(
-        X.parsear(Path(c["archivo"]), perfil, nat), nat
+        X.parsear(Path(c["archivo"]), perfil, nat, informe), nat
     )
     n = db.copiar_staging(carga_id, nat, filas)
     db.actualizar_carga(carga_id, filas_staging=n)
+
+    if informe.get("filas_resumen"):
+        db.crear_hallazgo(
+            encargo_id=c["encargo_id"], carga_id=carga_id,
+            tipo="FILAS_RESUMEN", severidad="INFORMATIVO",
+            descripcion=(f"Se dejaron fuera {informe['filas_resumen']} filas "
+                         f"sin fecha ni documento: son los totales por nivel "
+                         f"de cuenta y por tercero que el ERP intercala en el "
+                         f"auxiliar, no movimientos. Sumarlas multiplicaba los "
+                         f"débitos y créditos de cada cuenta. Entraron {n} "
+                         f"movimientos."),
+        )
+
+    # Una hoja que termina justo en un tope (100.000, 1.048.576...) sin que
+    # se haya leído su continuación: las cuentas que iban después quedan sin
+    # un solo movimiento, y el papel lo leería como "no hubo actividad".
+    for k in X.cortes(informe):
+        tope = (f"La hoja {k['hoja']!r} termina exactamente en la fila "
+                f"{k['ultima_fila']} ({k['filas_datos']} filas de datos), que "
+                f"es un tope de exporte. ")
+        if k["tipo"] == "CONTINUA_SIN_LEER":
+            texto = (tope + "El archivo sigue en "
+                     + ", ".join(repr(h) for h in k["sin_leer"])
+                     + ", que el mapeo no lee. Use Remapear e incluya todas "
+                       "las hojas del corte.")
+        else:
+            texto = (tope + "Es la última hoja del archivo: lo que seguía no "
+                     "llegó. Pida el exporte completo, por rangos si hace "
+                     "falta.")
+        db.crear_hallazgo(
+            encargo_id=c["encargo_id"], carga_id=carga_id,
+            tipo="EXPORTE_CORTADO", severidad="ADVERTENCIA", descripcion=texto,
+        )
 
     # Cuantas filas trajo cada hoja. Con un corte repartido en varias, "se
     # leyeron 12.188 filas" no dice si entraron las tres o solo una: el
