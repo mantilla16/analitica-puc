@@ -117,7 +117,7 @@ def _saldos_cuenta(carga_id: str) -> dict[str, dict]:
     if not carga_id:
         return {}
     filas = db.varios(
-        """SELECT codigo_puc, nombre_cuenta, clase, saldo_natural,
+        """SELECT codigo_puc, nombre_cuenta, clase, signo, saldo_natural,
                   coalesce(saldo_naturaleza, saldo_natural) AS saldo_naturaleza,
                   saldo_final
            FROM core.balance WHERE carga_id=%s AND nivel='Cuenta'""",
@@ -229,6 +229,12 @@ def variaciones(encargo_id: str, fase: str | None = None) -> dict:
             "nombre": (base or {}).get("nombre_cuenta") or nombres.get(cod),
             "clase": clase,
             "regla": regla,
+            # De qué lado está el saldo normal de la cuenta. Los saldos de
+            # esta fila van EN SU NATURALEZA (positivo = del lado normal),
+            # y sin decir cuál es ese lado un pasivo en positivo se lee como
+            # débito: así lo leyó el equipo en el primer papel de un cliente
+            # que exporta los créditos en negativo.
+            "naturaleza": "C" if int((base or {}).get("signo") or 1) < 0 else "D",
             "saldo_actual": sa,
             "saldo_comparativo": sc,
             "variacion": var,

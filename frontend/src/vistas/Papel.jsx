@@ -473,8 +473,8 @@ export default function Papel({ encargoId, fase }) {
               <tr className="rotulo border-b border-regla text-left">
                 <th className="px-3 py-2 font-normal">Cuenta</th>
                 <th className="px-3 py-2 font-normal">Nombre</th>
-                <th className="px-3 py-2 text-right font-normal">Actual</th>
-                <th className="px-3 py-2 text-right font-normal">Comparativo</th>
+                <th className="px-3 py-2 text-right font-normal" title="Saldo en su naturaleza: positivo = del lado normal de la cuenta (D o C); negativo = del lado contrario. No es el signo del ERP.">Actual · nat.</th>
+                <th className="px-3 py-2 text-right font-normal" title="Saldo en su naturaleza, igual que Actual.">Comparativo · nat.</th>
                 <th className="px-3 py-2 text-right font-normal">Variación</th>
                 <th className="px-3 py-2 text-right font-normal">%</th>
                 <th className="px-3 py-2 font-normal">Motivo</th>
@@ -484,7 +484,12 @@ export default function Papel({ encargoId, fase }) {
             <tbody>
               {d.filas.filter((f) => f.significativa).map((f) => [
                 <tr key={f.cuenta} className="border-b border-regla-fina">
-                  <td className="cifra px-3 py-2">{f.cuenta}</td>
+                  <td className="cifra px-3 py-2">
+                    {f.cuenta}
+                    {f.naturaleza && (
+                      <span className="ml-1 text-xs text-tinta-suave">{f.naturaleza}</span>
+                    )}
+                  </td>
                   <td className="max-w-[12rem] truncate px-3 py-2" title={f.nombre}>{f.nombre}</td>
                   <td className="cifra whitespace-nowrap px-3 py-2 text-right text-xs">{monto(f.saldo_actual)}</td>
                   <td className="cifra whitespace-nowrap px-3 py-2 text-right text-xs text-tinta-suave">{monto(f.saldo_comparativo)}</td>

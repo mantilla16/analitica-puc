@@ -315,17 +315,22 @@ def construir(p: dict) -> bytes:
     # ------------------------------------------------ 5. comparativo
     h = _hoja(wb, "Comparativo", "Comparativo por cuenta (NIA 520)",
               "Clases 1 a 3 contra el cierre anterior; 4 a 7 contra el mismo corte "
-              "del año anterior. Marca Δ.")
+              "del año anterior. Marca Δ. Saldos EN SU NATURALEZA: positivo = del "
+              "lado normal de la cuenta (columna Nat.: D débito, C crédito); "
+              "negativo = del lado contrario. No es el signo del ERP.")
     _tabla(h, 4,
-        ["Cuenta", "Nombre", "Clase", "Comparado contra", "Saldo actual",
-         "Saldo comparativo", "Variación", "%", "Motivo", "Marca"],
-        [[f["cuenta"], f["nombre"], f["clase"], f["regla"],
+        ["Cuenta", "Nombre", "Clase", "Nat.", "Comparado contra",
+         "Saldo actual (en su naturaleza)",
+         "Saldo comparativo (en su naturaleza)", "Variación", "%", "Motivo",
+         "Marca"],
+        [[f["cuenta"], f["nombre"], f["clase"], f.get("naturaleza", ""),
+          f["regla"],
           _num(f["saldo_actual"]), _num(f["saldo_comparativo"]),
           _num(f["variacion"]), _num(f["variacion_pct"]),
           f["motivo"] or "", "Δ" if f["significativa"] else ""]
          for f in d["filas"]],
-        anchos=[11, 40, 8, 30, 20, 20, 20, 10, 18, 8],
-        formatos={5: PESOS, 6: PESOS, 7: PESOS, 8: PORC}, principal=True)
+        anchos=[11, 40, 8, 6, 30, 22, 22, 20, 10, 18, 8],
+        formatos={6: PESOS, 7: PESOS, 8: PESOS, 9: PORC}, principal=True)
 
     # ------------------------------------------- 5.b análisis del modelo
     # Hoja aparte y no una columna del comparativo: el texto es largo y en
