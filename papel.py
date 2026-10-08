@@ -131,7 +131,8 @@ def _cuentas_fuera_de_catalogo(carga_id: str, limite: int = 200) -> dict:
     total = db.uno(f"SELECT count(*) AS n {filtro}", (carga_id,))["n"]
     cuentas = db.varios(
         f"""SELECT b.codigo_puc, b.nombre_cuenta, b.clase, b.signo,
-                   b.saldo_final, b.saldo_natural
+                   b.saldo_final, b.saldo_natural,
+                   coalesce(b.saldo_naturaleza, b.saldo_natural) AS saldo_naturaleza
             {filtro}
             ORDER BY abs(b.saldo_natural) DESC, b.codigo_puc
             LIMIT %s""",
@@ -152,7 +153,11 @@ def _cuentas_fuera_de_catalogo(carga_id: str, limite: int = 200) -> dict:
         c["prefijo_naturaleza"] = pre
         c["naturaleza_declarada"] = declarado
         c["heredada_de"] = nombres.get(pre)
-        c["saldo_contradice_naturaleza"] = D(str(c["saldo_natural"] or 0)) < 0
+        # Sobre el saldo EN SU NATURALEZA, no sobre la cifra comparable: con
+        # un archivo que ya trae los creditos en negativo, la comparable de
+        # todo pasivo es negativa y el control marcaba cada uno como
+        # contrario a su naturaleza.
+        c["saldo_contradice_naturaleza"] = D(str(c["saldo_naturaleza"] or 0)) < 0
         # El vecino de catálogo más cercano ayuda a juzgar: si 1590 se creó al
         # lado de 1592 "Depreciación acumulada", que es de crédito, suponerle
         # débito por la clase es probablemente un error.

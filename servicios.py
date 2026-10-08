@@ -422,6 +422,19 @@ def despachar_alertas() -> list[dict]:
 # PROMOCIÓN DEL BALANCE
 # =====================================================================
 
+def _texto_irregulares(irregulares: list[dict]) -> str:
+    """Lo que hay que decir cuando la contención no se pudo probar por
+    prefijo y se probó por subcuenta."""
+    subs = ", ".join(r["subcuenta"] for r in irregulares[:10])
+    mas = f" y {len(irregulares) - 10} más" if len(irregulares) > 10 else ""
+    return (f" En {len(irregulares)} subcuenta(s) ({subs}{mas}) el codigo de "
+            f"algunos hijos no empieza con el de su padre -- el ERP corre un "
+            f"digito cuando el consecutivo pasa de 99 -- asi que la prueba "
+            f"por padre no aplicaba. Ahi se comprobo por subcuenta: la suma "
+            f"de las cuentas de detalle da exactamente la de los auxiliares "
+            f"cargados. Tampoco ahi se perdio saldo.")
+
+
 def promover_balance(carga_id: str) -> dict:
     """staging -> core.balance. Filtra niveles, deriva jerarquía y signo."""
     c = db.carga(carga_id)
@@ -535,7 +548,9 @@ def promover_balance(carga_id: str) -> dict:
                     f"las {contenido['padres']} cuentas padre que si se "
                     f"cargaron, y que cada padre cuadra exactamente con la "
                     f"suma de las filas excluidas que cuelgan de el. Excluirlas "
-                    f"quita detalle, no cifras: el balance no cambia."),
+                    f"quita detalle, no cifras: el balance no cambia."
+                    + (_texto_irregulares(contenido["codificacion_irregular"])
+                       if contenido["codificacion_irregular"] else "")),
             )
         else:
             # Aqui si se perdio saldo. Es bloqueante: un balance al que le

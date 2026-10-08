@@ -466,11 +466,67 @@ def verificar_excluidas(cargadas: list[dict], excluidas: list[dict],
                                "suma_hijos": suma, "saldo_padre": por_cod[padre],
                                "diferencia": dif})
 
+    # --- segunda prueba: codificación que no respeta el prefijo -----------
+    # Buscar al padre por prefijo supone que el código de un hijo empieza
+    # con el de su padre. SAP B1 no lo garantiza: cuando un auxiliar pasa
+    # del consecutivo 99, el siguiente "se corre" un dígito. En el balance
+    # de mayo 2026 de un cliente, 2105100410..55 cuelgan de 21051003 (su
+    # saldo los incluye) aunque su prefijo sea un 21051004 que no existe;
+    # 1380950317 cuelga de 13809505; y una cuenta suelta de 9 dígitos,
+    # 135518100, se quedaba con los hijos de 13551810. Ningún peso se había
+    # perdido, y el control declaraba BLOQUEANTE el balance entero.
+    #
+    # Lo que falla por prefijo se vuelve a probar en su subcuenta (6
+    # dígitos, el último nivel completo): la suma de las HOJAS por debajo
+    # del auxiliar tiene que dar la suma de los auxiliares que tienen
+    # detalle. Es la misma aritmética, sin suponer quién es padre de quién.
+    # Si tampoco cuadra ahí, el saldo se perdió de verdad y sigue siendo
+    # bloqueante.
+    irregulares = []
+    if descuadres or huerfanas:
+        filas = {**{f["codigo_puc"]: Decimal(str(f.get("saldo_final") or 0))
+                    for f in cargadas},
+                 **{(e.get("codigo_puc") or "").strip():
+                    Decimal(str(e.get("saldo_final") or 0)) for e in excluidas}}
+
+        def _cuadra_subcuenta(sub: str) -> dict | None:
+            if sub not in por_cod:
+                return None
+            hondas = [c for c in filas if c.startswith(sub) and len(c) > 8]
+            hojas = [c for c in hondas
+                     if not any(o != c and o.startswith(c) for o in hondas)]
+            auxiliares = [c for c in filas if c.startswith(sub) and len(c) == 8
+                          and any(h.startswith(c) for h in hondas)]
+            s_hojas = sum((filas[c] for c in hojas), Decimal(0))
+            s_aux = sum((filas[c] for c in auxiliares), Decimal(0))
+            if abs(s_hojas - s_aux) > tolerancia:
+                return None
+            return {"subcuenta": sub, "hojas": len(hojas),
+                    "auxiliares": len(auxiliares), "saldo": s_aux}
+
+        resueltas: dict[str, dict | None] = {}
+        for cod in ([d["codigo_puc"] for d in descuadres]
+                    + [h["codigo_puc"] for h in huerfanas]):
+            sub = cod[:6]
+            if sub not in resueltas:
+                resueltas[sub] = _cuadra_subcuenta(sub)
+
+        def _ok(cod: str) -> bool:
+            return resueltas.get(cod[:6]) is not None
+
+        irregulares = [r for r in resueltas.values() if r]
+        descuadres = [d for d in descuadres if not _ok(d["codigo_puc"])]
+        huerfanas = [h for h in huerfanas if not _ok(h["codigo_puc"])]
+
     return {
         "contenidas": not huerfanas and not descuadres,
         "padres": len(grupos),
         "huerfanas": huerfanas,
         "descuadres": descuadres,
+        # Subcuentas donde el prefijo no servía y el saldo se comprobó por
+        # hojas. Se devuelven para decirlo: un control que se relaja sin
+        # avisar es un control que no se corrió.
+        "codificacion_irregular": irregulares,
         "tolerancia": tolerancia,
     }
 

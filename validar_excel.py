@@ -212,6 +212,44 @@ def validar_exporte_cortado() -> None:
 
 
 # =====================================================================
+# FILAS EXCLUIDAS CUYO CODIGO NO RESPETA EL PREFIJO DEL PADRE
+# =====================================================================
+
+def validar_codificacion_irregular() -> None:
+    """No es lectura de Excel, pero tampoco necesita base, y sin esto la
+    regla no corre en ninguna parte: un balance real quedo BLOQUEANTE por
+    ella sin haber perdido un peso."""
+    import reglas as R
+
+    def c(cod, v):
+        return {"codigo_puc": cod, "saldo_final": v}
+
+    # 21051003 incluye hijos 21051003xx y tambien 21051004xx (el consecutivo
+    # paso de 99); 13551810 tiene un "hermano" de 9 digitos en cero que se
+    # come por prefijo a sus hijos.
+    cargadas = [c("210510", -500), c("21051001", -100), c("21051003", -400),
+                c("135518", 70), c("13551805", 30), c("13551810", 40),
+                c("135518100", 0)]
+    excluidas = [c("2105100121", -100), c("2105100312", -150),
+                 c("2105100410", -250),
+                 c("1355180501", 30), c("13551810001", 0),
+                 c("1355181001", 15), c("1355181002", 25)]
+    r = R.verificar_excluidas(cargadas, excluidas)
+    caso("codificación irregular · no se pierde saldo, no es bloqueante",
+         True, r["contenidas"],
+         "por prefijo, 21051004xx caía en 210510 y descuadraba en falso")
+    caso("codificación irregular · se dice dónde se probó por subcuenta",
+         ["135518", "210510"],
+         sorted(x["subcuenta"] for x in r["codificacion_irregular"]))
+
+    perdida = R.verificar_excluidas(
+        [c("110505", 100), c("11050501", 100)],
+        [c("1105050101", 60), c("1105050201", 30)])
+    caso("codificación irregular · una pérdida real sigue siendo bloqueante",
+         False, perdida["contenidas"])
+
+
+# =====================================================================
 # UN CORTE REPARTIDO EN VARIAS HOJAS
 # =====================================================================
 
@@ -344,6 +382,7 @@ def main() -> int:
     validar_dimension_mal_declarada()
     validar_filas_de_total()
     validar_exporte_cortado()
+    validar_codificacion_irregular()
 
     fallan = [r for r in resultados if not r[0]]
     for ok, nombre, nota in resultados:
