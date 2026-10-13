@@ -175,6 +175,13 @@ export default function Encargo({ encargoId, onVolver }) {
                 <span className="cifra text-xs text-tinta-suave">
                   {entero(i.tipo.startsWith("BAL")
                     ? i.filas_en_balance : i.filas_cargadas)} filas
+                  {i.tipo.startsWith("BAL") && i.filas_sintetizadas > 0 && (
+                    <span className="ml-1 text-tinta-suave"
+                          title={`${entero(i.filas_del_archivo)} vienen del archivo del cliente. ${entero(i.filas_sintetizadas)} las sumó el motor por truncamiento del código, para armar los agrupadores por Clase, Cuenta y Subcuenta que SAP no exporta. El total es el detalle más los padres.`}>
+                      ({entero(i.filas_del_archivo)} del archivo
+                       + {entero(i.filas_sintetizadas)} derivadas)
+                    </span>
+                  )}
                 </span>
               ) : null}
 

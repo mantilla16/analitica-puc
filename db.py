@@ -384,7 +384,13 @@ def checklist(encargo_id: str) -> list[dict]:
                   (SELECT count(*) FROM core.hallazgo h WHERE h.carga_id=c.id)
                     AS n_hallazgos,
                   (SELECT count(*) FROM core.balance b WHERE b.carga_id=c.id)
-                    AS filas_en_balance
+                    AS filas_en_balance,
+                  (SELECT count(*) FROM core.balance b
+                   WHERE b.carga_id=c.id AND b.origen='ARCHIVO')
+                    AS filas_del_archivo,
+                  (SELECT count(*) FROM core.balance b
+                   WHERE b.carga_id=c.id AND b.origen='SINTETIZADO')
+                    AS filas_sintetizadas
            FROM core.insumo i
            LEFT JOIN core.encargo_insumo ei
                   ON ei.tipo=i.tipo AND ei.encargo_id=%s
