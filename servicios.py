@@ -473,20 +473,29 @@ def promover_balance(carga_id: str) -> dict:
     # anunciar una exclusion y dejar al auditor con la duda.
     excluidas: list[dict] = []
 
+    # Si el archivo trae una longitud que la tabla nivel_cargable no tiene
+    # configurada (tipico de los exports de SAP de DAABON con 10 digitos),
+    # se registra al vuelo y se la carga igual. El motor luego sintetiza
+    # los padres faltantes por truncamiento. Preferir cargar y dejar
+    # constancia a bloquear por una fila que falta en el catalogo: el
+    # papel pierde valor cuando el motor dice "no se" en vez de "mira,
+    # con esto que tengo esto es lo que se puede decir".
+    def _nivel_de(digitos: int) -> dict:
+        n = por_digitos.get(digitos)
+        if n is not None:
+            return n
+        n = db.asegurar_nivel_cargable(digitos)
+        por_digitos[digitos] = n
+        niveles[n["nivel"]] = n
+        return n
+
     for s in crudo:
         cod = (s["codigo_puc"] or "").strip()
         if not cod or not cod.isdigit() or not ("1" <= cod[0] <= "7"):
             descartadas += 1
             fuera_por_codigo += 1
             continue
-        niv = por_digitos.get(len(cod))
-        if niv is None:                     # Grupo y Subauxiliar no se cargan
-            descartadas += 1
-            fuera_por_digitos[len(cod)] = fuera_por_digitos.get(len(cod), 0) + 1
-            excluidas.append({"codigo_puc": cod,
-                              "saldo_final": Decimal(s["saldo_final"] or 0)})
-            continue
-
+        niv = _nivel_de(len(cod))
         signo = R.resolver_signo(cod, exc, sclase)
         sf = Decimal(s["saldo_final"] or 0)
         # Dos cifras distintas y hace falta separarlas: `saldo_natural` es la

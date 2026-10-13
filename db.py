@@ -83,6 +83,39 @@ def niveles_cargables() -> dict[str, dict]:
     return {f["nivel"]: f for f in filas}
 
 
+def asegurar_nivel_cargable(digitos: int) -> dict:
+    """Garantiza que exista una fila en core.nivel_cargable para esta
+    longitud de codigo. Si el PUC ya tiene un nombre asociado a esos
+    digitos (como Subauxiliar=10), se usa ese nombre; si no, se inventa
+    uno generico. Idempotente.
+
+    Sirve para que el motor no se detenga porque la tabla de niveles no
+    estaba al dia: si llega un balance de SAP con 10 digitos y nadie
+    corrio la migracion correspondiente, el motor registra el nivel y
+    sigue, en vez de rechazar la carga entera.
+    """
+    row = uno("SELECT nivel FROM core.puc_nivel WHERE digitos=%s", (digitos,))
+    if row and row.get("nivel"):
+        nombre = row["nivel"]
+    else:
+        nombre = f"Nivel-{digitos}"
+        ejecutar(
+            "INSERT INTO core.puc_nivel (nivel, digitos, orden) "
+            "VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+            (nombre, digitos, 10 + digitos),
+        )
+    ejecutar(
+        "INSERT INTO core.nivel_cargable "
+        "(nivel, digitos, es_comparativo, nivel_completo, orden, nota) "
+        "VALUES (%s, %s, false, false, %s, "
+        "'Auto-registrado al cargar un balance con esta longitud de codigo.') "
+        "ON CONFLICT (nivel) DO NOTHING",
+        (nombre, digitos, 10 + digitos),
+    )
+    return {"nivel": nombre, "digitos": digitos,
+            "nivel_completo": False, "orden": 10 + digitos}
+
+
 def excepciones_naturaleza() -> dict[str, str]:
     filas = varios("SELECT codigo, naturaleza FROM core.puc WHERE naturaleza IS NOT NULL")
     return {f["codigo"]: f["naturaleza"] for f in filas}
