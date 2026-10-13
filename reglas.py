@@ -672,9 +672,25 @@ def cuadre_por_nivel(filas: list[dict], niveles: dict[str, dict]) -> list[dict]:
 
 
 def cuadre_por_linea(filas: list[dict]) -> list[dict]:
-    """saldo_inicial + debito - credito = saldo_final, fila por fila."""
+    """saldo_inicial + debito - credito = saldo_final, fila por fila.
+
+    Si el archivo no trae debito/credito (balances que YA pasaron por una
+    validacion previa y entran solo con saldo_final), el chequeo no se
+    puede ejecutar: no se finge que paso. El papel declara aparte que la
+    linea no se cuadro -- callarse haria creer que el control corrio y
+    es justo lo contrario.
+    """
     malas = []
     for f in filas:
+        # Solo filas del ARCHIVO: las SINTETIZADAS son sumas puras y
+        # cuadran por construccion -- forzarlas por aqui es ruido.
+        if f.get("origen") == "SINTETIZADO":
+            continue
+        # Si el archivo no trajo la columna, no es un cero: es una
+        # pregunta sin respuesta. Comparar contra 0 reportaria una
+        # diferencia falsa igual al saldo final.
+        if f.get("debito") is None and f.get("credito") is None:
+            continue
         si, db, cr, sf = (Decimal(str(f.get(k) or 0))
                           for k in ("saldo_inicial", "debito", "credito", "saldo_final"))
         dif = (si + db - cr - sf).quantize(Decimal("0.01"))

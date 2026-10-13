@@ -547,6 +547,13 @@ def promover_balance(carga_id: str) -> dict:
 
     cuadre = R.cuadre_por_nivel(filas, niveles)
     lineas = R.cuadre_por_linea(filas)
+    # Cuando el archivo no trajo debito/credito -- balances ya validados
+    # en origen, que entran solo con saldo_final -- el cuadre por linea
+    # no se puede ejecutar. Es informacion que el papel tiene que
+    # DECLARAR, no callar.
+    sin_mov = all(f.get("origen") == "SINTETIZADO"
+                  or (f.get("debito") is None and f.get("credito") is None)
+                  for f in filas)
     hay_bloqueantes = (bool(lineas)
                        or any(q["estado"] == "DESCUADRE" for q in cuadre)
                        or not contenido["contenidas"])
@@ -643,6 +650,20 @@ def promover_balance(carga_id: str) -> dict:
             codigo_puc=m["codigo_puc"], monto=m["diferencia"],
             descripcion="saldo_inicial + debito - credito <> saldo_final",
             fila_origen=m["fila_origen"],
+        )
+    if sin_mov and not lineas:
+        # El cuadre por linea no corrio -- el archivo entro ya validado
+        # desde un proceso previo. El papel lo declara: callar hace creer
+        # que el control paso cuando no ejecuto.
+        db.crear_hallazgo(
+            encargo_id=c["encargo_id"], carga_id=carga_id,
+            tipo="LINEA_NO_CUADRADA", severidad="INFORMATIVO",
+            descripcion=("El archivo no trajo columnas de debito/credito, "
+                         "asi que el chequeo 'saldo_inicial + debito - "
+                         "credito = saldo_final' por fila no se ejecuto. "
+                         "El balance se toma como validado en origen; el "
+                         "cuadre por nivel y la contencion de excluidas si "
+                         "corrieron sobre el saldo final."),
         )
     # Un tope que no se declara se lee como "esos son todos": el auditor
     # revisa 50 cuentas creyendo que agotó el problema. Se deja constancia.
