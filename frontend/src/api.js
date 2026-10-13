@@ -64,6 +64,7 @@ export const api = {
   procesar: (cargaId) =>
     pedir(`/cargas/${cargaId}/procesar?sincrono=true`, { method: "POST" }),
   promover: (cargaId) => pedir(`/cargas/${cargaId}/promover`, { method: "POST" }),
+  eliminarCarga: (cargaId) => pedir(`/cargas/${cargaId}`, { method: "DELETE" }),
   carga: (cargaId) => pedir(`/cargas/${cargaId}`),
   evidencia: (cotejoId) => pedir(`/cotejos/${cotejoId}/evidencia?limite=100`),
   hallazgos: (cargaId) => pedir(`/cargas/${cargaId}/hallazgos`),

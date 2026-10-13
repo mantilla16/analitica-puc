@@ -233,6 +233,32 @@ export default function Encargo({ encargoId, onVolver }) {
                 </button>
               )}
 
+              {/* Rehacer mapeo olvida el perfil pero deja la carga pegada.
+                  Cuando esa carga fue parcial o quedo "SIN PROMOVER" sin
+                  salida, no hay como empezar de cero: Borrar la quita entera
+                  (balance, movimientos, staging, hallazgos y archivo) para
+                  que el proximo subir sea de verdad una carga nueva. */}
+              {i.cargado && i.carga_id && (
+                <button
+                  onClick={async () => {
+                    if (!confirm(
+                      `Esto borra la carga de "${i.tipo}" por completo: balance, ` +
+                      `movimientos, hallazgos y archivo. ¿Seguro?`)) return;
+                    try {
+                      await api.eliminarCarga(i.carga_id);
+                      setError(null);
+                      setResultado(null);
+                      await refrescar();
+                    } catch (err) {
+                      setError(err.message);
+                    }
+                  }}
+                  title="Borra la carga entera para poder empezar de cero"
+                  className="btn-texto shrink-0 text-xs text-rojo hover:text-rojo-vivo">
+                  Borrar
+                </button>
+              )}
+
               <label className="btn btn-contorno btn-chico shrink-0 cursor-pointer">
                 {i.cargado ? "Reemplazar" : "Subir"}
                 <input

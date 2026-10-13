@@ -625,6 +625,34 @@ def balance_de_carga(carga_id: str) -> list[dict]:
     return varios("SELECT * FROM core.balance WHERE carga_id=%s", (carga_id,))
 
 
+def cargas_con_archivo(archivo: str) -> int:
+    """Cuantas cargas comparten esta ruta de archivo. Si da > 0, borrar
+    el archivo deja a otras cargas sin su fuente."""
+    return uno(
+        "SELECT count(*) AS n FROM core.carga WHERE archivo=%s", (archivo,)
+    )["n"]
+
+
+def eliminar_carga(carga_id: str) -> dict | None:
+    """Borra la carga entera: balance promovido, movimientos, staging,
+    hallazgos, vinculo con el encargo. Devuelve la ruta del archivo
+    fisico para que la capa superior pueda borrarlo del disco.
+
+    core.movimiento (particionado) NO tiene FK a core.carga: se borra
+    aparte. Todo lo demas cuelga con ON DELETE CASCADE.
+    """
+    c = uno("SELECT archivo FROM core.carga WHERE id=%s", (carga_id,))
+    if not c:
+        return None
+    with conn() as co:
+        with co.cursor() as cur:
+            cur.execute("DELETE FROM core.movimiento WHERE carga_id=%s",
+                        (carga_id,))
+            cur.execute("DELETE FROM core.carga WHERE id=%s", (carga_id,))
+        co.commit()
+    return c
+
+
 # =====================================================================
 # EVIDENCIA
 # =====================================================================

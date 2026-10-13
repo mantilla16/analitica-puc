@@ -85,6 +85,7 @@ ACCIONES = [
     ("POST",   r"^/cargas/[^/]+/mapeo$",              "MAPEO_CONFIRMADO",     "carga"),
     ("POST",   r"/insumos/[^/]+/remapear$",            "MAPEO_INVALIDADO",     "encargo"),
     ("POST",   r"^/cargas/[^/]+/procesar$",           "CARGA_PROCESADA",      "carga"),
+    ("DELETE", r"^/cargas/[^/]+$",                    "CARGA_BORRADA",        "carga"),
     ("POST",   r"^/cargas/[^/]+/promover$",           "BALANCE_PROMOVIDO",    "carga"),
     ("PUT",    r"^/encargos/[^/]+/materialidades/",   "MATERIALIDAD_GUARDADA","encargo"),
     ("PUT",    r"^/encargos/[^/]+/parametros$",       "PARAMETROS_GUARDADOS", "encargo"),
@@ -898,6 +899,33 @@ def procesar(carga_id: str, request: Request, tareas: BackgroundTasks,
 
     tareas.add_task(_tarea, carga_id)   # movimientos: ~40 s
     return {"carga_id": carga_id, "estado": "PROCESANDO"}
+
+
+@app.delete("/cargas/{carga_id}")
+def eliminar_carga(carga_id: str, request: Request) -> dict:
+    """Borra la carga entera: balance promovido, movimientos, staging,
+    hallazgos y el vinculo con el encargo. Tambien el archivo xlsx del
+    disco si queda sin dueño.
+
+    Rehacer mapeo olvida el perfil pero deja la carga pegada; cuando esa
+    carga fue parcial, se repite el estado "SIN PROMOVER" sin salida.
+    Borrar permite empezar de cero: el proximo subir crea una carga
+    nueva con mapeo nuevo.
+    """
+    c = _carga(carga_id)
+    archivo = db.eliminar_carga(carga_id)
+    # El archivo se guarda por hash de contenido; si otra carga apunta al
+    # mismo path (porque alguien subio el mismo xlsx dos veces), no se
+    # borra para no dejar a esa otra carga sin su fuente.
+    if archivo and archivo.get("archivo"):
+        p = Path(archivo["archivo"])
+        if p.exists() and not db.cargas_con_archivo(archivo["archivo"]):
+            try:
+                p.unlink()
+            except OSError:
+                pass
+    request.state.bitacora = {"tipo": c["tipo"], "nombre": c.get("nombre")}
+    return {"borrado": True}
 
 
 @app.post("/cargas/{carga_id}/promover")
