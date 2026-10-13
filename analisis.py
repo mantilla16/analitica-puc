@@ -37,13 +37,20 @@ def balance(encargo_id: str, tipo: str = "BAL_ACTUAL",
     args: list = [cid]
 
     if padre:
-        # hijos directos: el siguiente nivel hacia abajo
+        # Hijos directos: el siguiente nivel hacia abajo CON DATOS reales en
+        # este balance, no el siguiente nivel declarado en nivel_cargable.
+        # Si el archivo trae niveles salteados -- SAP suele saltar de Clase
+        # a Cuenta sin pasar por Grupo -- preguntarle a nivel_cargable
+        # devolvia el nivel teorico (Grupo=2 digitos) y el drill mostraba
+        # vacio aunque hubiera 19 cuentas colgando de esa clase.
         sig = db.uno(
-            """SELECT nivel, digitos FROM core.nivel_cargable
-               WHERE digitos > %s ORDER BY digitos LIMIT 1""",
-            (len(padre),),
+            """SELECT min(digitos) AS digitos
+               FROM core.balance
+               WHERE carga_id=%s AND digitos>%s
+                 AND left(codigo_puc, %s) = %s""",
+            (cid, len(padre), len(padre), padre),
         )
-        if not sig:
+        if not sig or sig["digitos"] is None:
             return {"carga_id": cid, "filas": [], "total": 0}
         where.append("b.digitos = %s")
         args.append(sig["digitos"])
