@@ -501,12 +501,26 @@ def promover_balance(carga_id: str) -> dict:
             "saldo_final": sf, "signo": signo,
             "saldo_natural": sf if ya_con_signo else sf * signo,
             "saldo_naturaleza": sf * signo,
+            "origen": "ARCHIVO",
         })
 
     # Un codigo repetido tumbaba el COPY completo por la llave unica de
     # core.balance: la carga quedaba sin una sola fila y el auditor solo veia
     # un 500. Se resuelve segun por que se repite, y siempre se deja dicho.
     filas, duplicados = R.consolidar_duplicados(filas)
+
+    # Los exports tipo SAP solo traen las hojas del arbol (10 digitos). Los
+    # agrupadores (Clase/Cuenta/Subcuenta) los deriva el motor sumando por
+    # truncamiento del codigo, y los marca como SINTETIZADO para que el papel
+    # pueda declarar lo que vino del archivo y lo que calculo el motor. Para
+    # archivos que ya traen los niveles completos (Helisa & cia) esto es un
+    # no-op: no se sintetiza lo que ya esta.
+    filas, sintetizadas = R.sintetizar_padres_faltantes(
+        filas, niveles, exc, sclase)
+    if sintetizadas:
+        nombres = db.nombres_puc()
+        for f in sintetizadas:
+            f["nombre_cuenta"] = nombres.get(f["codigo_puc"]) or "(sintetizada)"
 
     # Se comprueba ANTES de escribir nada: si lo excluido no estaba
     # contenido, el estado de la carga tiene que reflejarlo.

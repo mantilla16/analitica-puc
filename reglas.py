@@ -209,24 +209,37 @@ def convencion_signo(filas, signo_clase: dict[str, int]
     Devuelve la convención y las dos sumas, para poder mostrarlas: una
     detección que no dice cuánto dio cada hipótesis no se puede auditar.
     """
+    # Idealmente se mide sobre las clases. Si el archivo no las trae -- caso
+    # tipico de los exports de SAP, que solo mandan auxiliares de 10 digitos
+    # -- se usan las hojas mas finas: cubren cada peso una sola vez, igual
+    # que las clases, y la suma por primer digito del codigo es equivalente
+    # a sumar por clase.
+    codigos = [(f.get("codigo_puc") or "").strip() for f in filas]
+    tiene_clases = any(len(c) == 1 and c.isdigit() for c in codigos)
+    if tiene_clases:
+        acepta = lambda c: len(c) == 1 and c.isdigit()
+    else:
+        max_dig = max((len(c) for c in codigos if c.isdigit()), default=0)
+        acepta = lambda c: len(c) == max_dig and c.isdigit()
+
     crudo = Decimal(0)
     con_signo = Decimal(0)
-    clases = 0
-    for f in filas:
-        cod = (f.get("codigo_puc") or "").strip()
-        if len(cod) != 1 or not cod.isdigit():
+    hojas = 0
+    for f, cod in zip(filas, codigos):
+        if not acepta(cod):
             continue
-        clases += 1
+        hojas += 1
         sf = Decimal(str(f.get("saldo_final") or 0))
         crudo += sf
-        con_signo += sf * signo_clase.get(cod, 1)
+        con_signo += sf * signo_clase.get(cod[0], 1)
 
     crudo = crudo.quantize(Decimal("0.01"))
     con_signo = con_signo.quantize(Decimal("0.01"))
-    sumas = {"clases": clases, "suma_tal_cual": str(crudo),
-             "suma_con_signo_del_catalogo": str(con_signo)}
+    sumas = {"clases": hojas, "suma_tal_cual": str(crudo),
+             "suma_con_signo_del_catalogo": str(con_signo),
+             "nivel_detectado": "clases" if tiene_clases else "hojas"}
 
-    if not clases:
+    if not hojas:
         return "INDETERMINADA", sumas
     # El orden importa cuando las dos cuadran, que pasa si el balance está
     # todo en cero: se prefiere CATALOGO por ser el comportamiento anterior,
@@ -529,6 +542,74 @@ def verificar_excluidas(cargadas: list[dict], excluidas: list[dict],
         "codificacion_irregular": irregulares,
         "tolerancia": tolerancia,
     }
+
+
+def sintetizar_padres_faltantes(
+    filas: list[dict], niveles: dict[str, dict],
+    excepciones: dict[str, str], signo_clase: dict[str, int],
+) -> tuple[list[dict], list[dict]]:
+    """Para cada nivel COMPLETO que no vino en el archivo, deriva las
+    filas de ese nivel sumando por truncamiento del codigo.
+
+    Pasa con los exports de SAP del grupo DAABON: traen solo Subauxiliar
+    (10 digitos) y asumen que Clase/Cuenta/Subcuenta las calcula uno al
+    pintar el reporte. Aqui las calcula el motor, pero las marca como
+    SINTETIZADO para que el papel pueda decir que parte vino del archivo
+    y que parte la derivo el motor sumando hojas.
+
+    Solo se sintetizan niveles COMPLETOS: los que estan obligados a
+    cuadrar la ecuacion contable. No se toca Auxiliar porque hay
+    subcuentas que no bajan a ese nivel -- derivarlo seria inventar lo
+    que el archivo no decia.
+
+    Si el archivo ya trae el nivel, no se sintetiza nada: el gate G01
+    se encarga de verificar que su suma cuadre contra la de las hojas.
+    """
+    presentes = {f["digitos"] for f in filas}
+    completos = sorted(
+        (n for n in niveles.values() if n["nivel_completo"]),
+        key=lambda x: x["digitos"], reverse=True,
+    )
+
+    nuevas: list[dict] = []
+    for n in completos:
+        d = n["digitos"]
+        if d in presentes:
+            continue
+        padres: dict[str, dict] = {}
+        for f in filas:
+            if f["digitos"] <= d:
+                continue
+            cod = f["codigo_puc"][:d]
+            p = padres.get(cod)
+            if p is None:
+                signo = resolver_signo(cod, excepciones, signo_clase)
+                p = padres[cod] = {
+                    "codigo_puc": cod,
+                    "nombre_cuenta": None,       # el PUC puede llenarlo abajo
+                    "nivel": n["nivel"],
+                    "digitos": d,
+                    "clase": cod[0],
+                    "cuenta": cod[:4] if d >= 4 else None,
+                    "subcuenta": cod[:6] if d >= 6 else None,
+                    "saldo_inicial": Decimal(0),
+                    "debito": Decimal(0),
+                    "credito": Decimal(0),
+                    "saldo_final": Decimal(0),
+                    "signo": signo,
+                    "saldo_natural": Decimal(0),
+                    "saldo_naturaleza": Decimal(0),
+                    "origen": "SINTETIZADO",
+                }
+            p["saldo_inicial"] += Decimal(str(f["saldo_inicial"]))
+            p["debito"] += Decimal(str(f["debito"]))
+            p["credito"] += Decimal(str(f["credito"]))
+            p["saldo_final"] += Decimal(str(f["saldo_final"]))
+            p["saldo_natural"] += Decimal(str(f["saldo_natural"]))
+            p["saldo_naturaleza"] += Decimal(str(f["saldo_naturaleza"]))
+        nuevas.extend(padres.values())
+
+    return filas + nuevas, nuevas
 
 
 def cuadre_por_nivel(filas: list[dict], niveles: dict[str, dict]) -> list[dict]:
