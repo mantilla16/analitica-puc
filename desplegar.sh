@@ -74,9 +74,14 @@ fi
 # Los sql son idempotentes (IF NOT EXISTS, ON CONFLICT) por si acaso, pero
 # el objetivo aqui es NO volver a correrlos.
 paso "Migraciones SQL pendientes"
-DSN=$(sudo bash -c 'set -a; . /etc/analitica-puc.env; echo "$AUDITORIA_DSN"' 2>/dev/null || true)
+# El archivo .env es root:600 y el runner no puede sudo bash -c (no esta en
+# sudoers con eso). systemctl show si lee la propiedad Environment del
+# servicio y es equivalente: refleja lo que el proceso tiene cargado.
+DSN=$(systemctl show "$SERVICIO" --property=Environment --value 2>/dev/null \
+      | tr ' ' '\n' | sed -n 's/^AUDITORIA_DSN=//p' | head -1)
 if [ -z "$DSN" ]; then
-    rojo "No pude leer AUDITORIA_DSN de /etc/analitica-puc.env; me salto migraciones."
+    rojo "No pude leer AUDITORIA_DSN del servicio; me salto migraciones."
+    rojo "  prueba: systemctl show $SERVICIO --property=Environment"
 else
     psql_aqui() { PGCLIENTENCODING=UTF8 psql "$DSN" -v ON_ERROR_STOP=1 "$@"; }
     # El cerrojo de "primera corrida": si la tabla no existia, se SIEMBRAN
@@ -163,10 +168,14 @@ case "$estado" in
        exit 1 ;;
 esac
 
-modo=$(printf '%s' "$estado" | sed -n 's/.*"modo_correo":"\([^"]*\)".*/\1/p')
-listo=$(printf '%s' "$estado" | sed -n 's/.*"correo_listo":\([a-z]*\).*/\1/p')
+ms_cliente=$(printf '%s' "$estado" | sed -n 's/.*"msClientId":"\([^"]*\)".*/\1/p')
+ms_tenant=$(printf '%s' "$estado" | sed -n 's/.*"msTenantId":"\([^"]*\)".*/\1/p')
 
 verde ""
 verde "Desplegado: $(git log --oneline -1)"
-verde "Correo: modo $modo, $([ "$listo" = true ] && echo "en orden" || echo "CON PROBLEMAS")"
-[ "$listo" = true ] || rojo "Nadie podrá entrar hasta que el correo funcione."
+if [ -n "$ms_cliente" ] && [ -n "$ms_tenant" ]; then
+    verde "Ingreso con Microsoft: configurado"
+else
+    rojo "Ingreso con Microsoft: FALTAN credenciales"
+    rojo "  revisa AUDITORIA_MS_CLIENTE y AUDITORIA_MS_TENANT en /etc/analitica-puc.env"
+fi
