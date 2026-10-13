@@ -24,7 +24,15 @@ from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 
 MAX_FILAS_ESCANEO = 30
-MIN_CELDAS_ENCABEZADO = 4
+# Dos celdas de texto en una fila basta para que esa fila sea un
+# encabezado candidato. Antes se exigian cuatro porque los balances
+# traian ocho o nueve columnas (saldo_inicial, debito, credito, etc.);
+# ahora un balance minimo valido es solo codigo + saldo final (dos
+# columnas) y los exportes condensados de SAP del grupo DAABON traen
+# tres (codigo, descripcion, saldo). El umbral alto los rechazaba con
+# "sin encabezado reconocible". La fila con mas celdas sigue ganando,
+# asi que un titulo de dos palabras no desplaza al encabezado real.
+MIN_CELDAS_ENCABEZADO = 2
 
 # Un .xlsx declara en `<dimension ref="...">` qué rango usa, y openpyxl en
 # modo read_only le CREE: `iter_rows` recorta cada fila a la última columna
