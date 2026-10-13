@@ -380,7 +380,9 @@ def checklist(encargo_id: str) -> list[dict]:
     return varios(
         """SELECT i.orden, i.tipo, i.nombre AS insumo, i.requerido,
                   (c.id IS NOT NULL) AS cargado,
-                  c.id AS carga_id, c.archivo, c.estado, c.filas_cargadas,
+                  c.id AS carga_id, c.archivo, c.estado,
+                  coalesce(c.filas_cargadas, c.filas_staging) AS filas_cargadas,
+                  c.filas_staging,
                   (SELECT count(*) FROM core.hallazgo h WHERE h.carga_id=c.id)
                     AS n_hallazgos,
                   (SELECT count(*) FROM core.balance b WHERE b.carga_id=c.id)
