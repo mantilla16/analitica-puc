@@ -161,6 +161,11 @@ def a_fecha(v: Any, formato: str = "DD/MM/YYYY") -> str | None:
         "MM/DD/YYYY": "%m/%d/%Y",
         "YYYY-MM-DD": "%Y-%m-%d",
         "DD-MM-YYYY": "%d-%m-%Y",
+        # SAP exporta la fecha con puntos (11.02.2026). Hasta aqui caia
+        # en None y los movimientos quedaban sin fecha, lo que ademas
+        # hacia que la fila se descartara como "sin movimiento".
+        "DD.MM.YYYY": "%d.%m.%Y",
+        "YYYY.MM.DD": "%Y.%m.%d",
     }
     orden = [patrones.get(formato, "%d/%m/%Y")] + list(patrones.values())
     for p in orden:
@@ -590,6 +595,14 @@ def parsear(ruta: str | Path, perfil: dict, naturaleza: str,
                         and out.get("credito") in (None, 0):
                     out["debito"] = imp if imp > 0 else 0
                     out["credito"] = -imp if imp < 0 else 0
+
+                # Si el archivo no trae columna de secuencia (SAP y otros
+                # ERPs no la exportan: cada fila es su propio movimiento),
+                # se usa el numero de fila como secuencia sintetica. Es
+                # unico por archivo y mantiene la llave natural
+                # (num_doc, secuencia, codigo_puc) estable entre cargas.
+                if naturaleza == "MOVIMIENTO" and not out.get("secuencia"):
+                    out["secuencia"] = f"L{n}"
 
                 yield out
 
