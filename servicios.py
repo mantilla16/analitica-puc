@@ -443,6 +443,13 @@ def promover_balance(carga_id: str) -> dict:
     exc = db.excepciones_naturaleza()
     sclase = db.signo_por_clase()
 
+    # Si se promueve otra vez la misma carga -- porque fallo antes o porque
+    # el auditor rehizo el mapeo -- los hallazgos de la pasada previa quedan
+    # obsoletos. Dejarlos acumularia una copia mas de cada tipo en cada
+    # reintento (el UI mostraba "2 SALDO_EXCLUIDO_PERDIDO" con el mismo
+    # texto repetido).
+    db.borrar_hallazgos_de_carga(carga_id)
+
     crudo = db.staging_balance(carga_id)
 
     # Cómo trae este archivo los saldos se COMPRUEBA, no se configura: se

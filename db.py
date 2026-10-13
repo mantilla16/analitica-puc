@@ -696,6 +696,13 @@ def crear_hallazgo(**d: Any) -> None:
              tuple(d.values()))
 
 
+def borrar_hallazgos_de_carga(carga_id: str) -> None:
+    """Antes de re-correr una validacion sobre la misma carga: si no se
+    limpian, cada reintento acumula una copia mas de cada hallazgo y la
+    lista crece sin motivo real."""
+    ejecutar("DELETE FROM core.hallazgo WHERE carga_id=%s", (carga_id,))
+
+
 def cuadre_documentos(carga_id: str, limite: int = 100) -> dict:
     """¿Cada documento contable cuadra en sí mismo?
 
