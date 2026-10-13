@@ -63,6 +63,59 @@ else
     rojo "No encuentro .venv/bin/pip; me salto la instalacion de Python."
 fi
 
+# ----------------------------------------------------- 3.5 migraciones SQL
+# Aplica cualquier NN_*.sql del repo que no se haya aplicado todavia. Antes
+# habia que acordarse de correrla a mano, y una migracion sin aplicar deja
+# el codigo nuevo pegado contra una tabla vieja: el usuario carga su balance
+# y la app sigue respondiendo con la logica anterior. Pasa poco pero cuando
+# pasa es dificil de diagnosticar porque todo "parece" al dia.
+#
+# La tabla core.migracion registra lo ya aplicado por nombre de archivo.
+# Los sql son idempotentes (IF NOT EXISTS, ON CONFLICT) por si acaso, pero
+# el objetivo aqui es NO volver a correrlos.
+paso "Migraciones SQL pendientes"
+DSN=$(sudo bash -c 'set -a; . /etc/analitica-puc.env; echo "$AUDITORIA_DSN"' 2>/dev/null || true)
+if [ -z "$DSN" ]; then
+    rojo "No pude leer AUDITORIA_DSN de /etc/analitica-puc.env; me salto migraciones."
+else
+    psql_aqui() { PGCLIENTENCODING=UTF8 psql "$DSN" -v ON_ERROR_STOP=1 "$@"; }
+    # El cerrojo de "primera corrida": si la tabla no existia, se SIEMBRAN
+    # como ya aplicadas todas las migraciones hasta el numero 15 (que ya
+    # estaban en el servidor antes de que esto existiera). Sin esto, el
+    # primer deploy intentaria correr 01 al 15 contra una base que ya las
+    # tiene y fallaria -- no todas son idempotentes.
+    existia=$(psql_aqui -tAc "SELECT 1 FROM information_schema.tables
+                              WHERE table_schema='core' AND table_name='migracion'")
+    psql_aqui -tAc "CREATE TABLE IF NOT EXISTS core.migracion (
+                      archivo text PRIMARY KEY,
+                      aplicada_en timestamptz NOT NULL DEFAULT now())" >/dev/null
+    if [ "$existia" != "1" ]; then
+        for f in $(ls [0-9][0-9]_*.sql 2>/dev/null | sort); do
+            nn="${f%%_*}"
+            if [ "$nn" -le 15 ] 2>/dev/null; then
+                psql_aqui -c "INSERT INTO core.migracion(archivo) VALUES('$f')
+                              ON CONFLICT DO NOTHING" >/dev/null
+            fi
+        done
+        verde "  (primera vez: 01-15 sembradas como aplicadas)"
+    fi
+    for f in $(ls [0-9][0-9]_*.sql 2>/dev/null | sort); do
+        ya=$(psql_aqui -tAc "SELECT 1 FROM core.migracion WHERE archivo='$f'")
+        if [ "$ya" = "1" ]; then
+            continue
+        fi
+        printf '  %s ... ' "$f"
+        if psql_aqui -f "$f" >/dev/null 2>&1; then
+            psql_aqui -c "INSERT INTO core.migracion(archivo) VALUES('$f')" >/dev/null
+            verde "aplicada"
+        else
+            rojo "FALLO"
+            rojo "  revisa: PGCLIENTENCODING=UTF8 psql \"\$AUDITORIA_DSN\" -v ON_ERROR_STOP=1 -f $f"
+            exit 1
+        fi
+    done
+fi
+
 # ------------------------------------------------------------ 4. frontend
 paso "Construyendo el frontend"
 ( cd frontend && npm ci --silent && npm run build )
