@@ -399,7 +399,8 @@ def _descartable(codigo: Any) -> bool:
     return not s.isdigit()
 
 
-NUMERICOS = {"saldo_inicial", "debito", "credito", "saldo_final"}
+NUMERICOS = {"saldo_inicial", "debito", "credito", "saldo_final",
+             "importe_firmado"}
 
 # Lo que identifica una línea de movimiento: cuándo se registró y en qué
 # documento. Una fila que no trae NINGUNO de los dos no es un movimiento.
@@ -567,6 +568,20 @@ def parsear(ruta: str | Path, perfil: dict, naturaleza: str,
                         out[campo] = "Si" if a_booleano(v) else "No"
                     else:
                         out[campo] = None if v is None else str(v).strip()
+
+                # Importe firmado -> debito/credito por signo. SAP y
+                # similares exportan un solo campo con positivos como
+                # debito registrado y negativos como credito. Se traduce
+                # aqui para que la base, los cuadres y los papeles sigan
+                # viendo las dos columnas de siempre. Si el mapeo trae
+                # tanto el firmado como las dos columnas, prevalecen las
+                # dos columnas: son mas especificas y el firmado solo
+                # existe para rellenarlas cuando no vienen.
+                imp = out.pop("importe_firmado", None)
+                if imp is not None and out.get("debito") in (None, 0) \
+                        and out.get("credito") in (None, 0):
+                    out["debito"] = imp if imp > 0 else 0
+                    out["credito"] = -imp if imp < 0 else 0
 
                 yield out
 

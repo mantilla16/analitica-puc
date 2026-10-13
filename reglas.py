@@ -313,18 +313,45 @@ def cotejar(nuevas: dict[str, str], previas: dict[str, str]) -> dict[str, list[s
 # -------------------------------------------------------------- validaciones
 
 def validar_mapeo(mapeo: dict, campos: list[dict]) -> list[dict]:
-    """Requeridos presentes, campos existentes, sin columnas repetidas."""
+    """Requeridos presentes, campos existentes, sin columnas repetidas.
+
+    Caso especial del importe en movimientos: debito+credito y
+    importe_firmado son caminos alternativos para la misma cifra. Si el
+    mapeo trae uno de los dos (dos columnas separadas, o una unica con
+    signo), es valido. Pedir las tres a la vez obligaria a llenar
+    columnas inventadas.
+    """
     cols = {k: v for k, v in (mapeo.get("columnas") or {}).items() if v}
     conocidos = {c["campo"] for c in campos}
     problemas: list[dict] = []
 
-    for c in campos:
-        if c["requerido"] and c["campo"] not in cols:
+    campos_importe = {"debito", "credito", "importe_firmado"}
+    es_movimiento_con_importe = (
+        {c["campo"] for c in campos} & campos_importe == campos_importe
+    )
+    if es_movimiento_con_importe:
+        trae_par = "debito" in cols and "credito" in cols
+        trae_firmado = "importe_firmado" in cols
+        if not (trae_par or trae_firmado):
             problemas.append({
                 "severidad": "ERROR",
-                "problema": "Campo requerido sin relacionar",
-                "detalle": f"{c['etiqueta']} ({c['campo']})",
+                "problema": "Falta la columna del importe",
+                "detalle": ("Relacione 'Débito' Y 'Crédito' (dos columnas), "
+                            "o 'Importe con signo' (una sola columna con "
+                            "positivos como débito y negativos como crédito, "
+                            "como la exporta SAP)."),
             })
+
+    for c in campos:
+        if not c["requerido"] or c["campo"] in cols:
+            continue
+        if es_movimiento_con_importe and c["campo"] in campos_importe:
+            continue              # ya cubierto por la regla "uno de los dos"
+        problemas.append({
+            "severidad": "ERROR",
+            "problema": "Campo requerido sin relacionar",
+            "detalle": f"{c['etiqueta']} ({c['campo']})",
+        })
 
     for campo in cols:
         if campo not in conocidos:
