@@ -171,6 +171,56 @@ esac
 ms_cliente=$(printf '%s' "$estado" | sed -n 's/.*"msClientId":"\([^"]*\)".*/\1/p')
 ms_tenant=$(printf '%s' "$estado" | sed -n 's/.*"msTenantId":"\([^"]*\)".*/\1/p')
 
+# --------------------------------------------------- 6. cargas atascadas
+# Un auxiliar grande (10-15k filas de SAP) tarda ~40s en procesarse. Si
+# el servicio se reinicia por un deploy durante ese ventana, el
+# background task se mata y la carga queda con mapeo confirmado,
+# estado=CARGADA, filas_staging=NULL. El checkmark de "cargado" dice que
+# si -- pero el drill de movimientos sale vacio porque no llegaron a
+# staging. Pasa dificil de notar: el usuario ve "cargado" y no sabe que
+# el proceso quedo a medias.
+#
+# Aqui se barren las que quedaron asi y se relanzan. S.procesar es
+# idempotente (DELETE WHERE carga_id al inicio del COPY), asi que
+# relanzar nunca duplica.
+paso "Relanzando cargas atascadas"
+if [ -n "$DSN" ]; then
+    AUDITORIA_DSN="$DSN" ./.venv/bin/python -c "
+import sys
+import db
+import servicios as S
+db.abrir()
+try:
+    atascadas = db.varios('''
+        SELECT c.id::text AS id, c.tipo, cli.razon_social
+        FROM core.carga c
+        JOIN core.cliente cli ON cli.id = c.cliente_id
+        WHERE c.estado = 'CARGADA'
+          AND c.perfil_id IS NOT NULL
+          AND c.filas_staging IS NULL
+        ORDER BY cli.razon_social, c.tipo
+    ''')
+    if not atascadas:
+        print('  ninguna')
+        sys.exit(0)
+    print(f'  {len(atascadas)} por relanzar')
+    ok = 0
+    for a in atascadas:
+        print(f'  >>> {a[\"razon_social\"][:40]:40} {a[\"tipo\"]:20}', end=' ')
+        try:
+            r = S.procesar(a['id'])
+            print(f'OK filas={r.get(\"filas_staging\")}')
+            ok += 1
+        except Exception as e:
+            print(f'FALLO {type(e).__name__}: {str(e)[:80]}')
+    print(f'  {ok}/{len(atascadas)} relanzadas con exito')
+finally:
+    db.cerrar()
+" || rojo "No se pudo barrer atascadas; revisa el deploy manualmente."
+else
+    rojo "Sin DSN, no puedo barrer atascadas."
+fi
+
 verde ""
 verde "Desplegado: $(git log --oneline -1)"
 if [ -n "$ms_cliente" ] && [ -n "$ms_tenant" ]; then
