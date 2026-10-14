@@ -245,6 +245,30 @@ button { transition: color 0.15s ease, background-color 0.15s ease,
 }
 .pestana-activa:hover { background: var(--color-marca); color: var(--color-papel-alto); }
 
+/* Chips de filtro: para seleccionar entre varios criterios (grupos de
+   clientes, etiquetas). Mas livianos que las pestañas y pensados para
+   convivir varios en una fila. */
+.chip-filtro {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.75rem;
+  border-radius: 9999px;
+  border: 1px solid var(--color-regla);
+  background: var(--color-papel-alto);
+  color: var(--color-tinta-media);
+  font-size: 0.75rem;
+  font-weight: 500;
+  transition: color 120ms, background 120ms, border-color 120ms;
+}
+.chip-filtro:hover { color: var(--color-tinta); border-color: var(--color-tinta-suave); }
+.chip-filtro-activo {
+  background: var(--color-marca);
+  color: var(--color-papel-alto);
+  border-color: var(--color-marca);
+}
+.chip-filtro-activo:hover { color: var(--color-papel-alto); }
+
 /* ------------------------------------------------------------ tablas */
 .tabla thead tr { background: var(--color-papel-hondo); }
 .tabla tbody tr { transition: background-color 0.12s ease; }

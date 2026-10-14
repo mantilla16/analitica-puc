@@ -47,6 +47,7 @@ export const api = {
 
   encargos: () => pedir("/encargos"),
   encargo: (id) => pedir(`/encargos/${id}`),
+  grupos: () => pedir("/grupos"),
   crearEncargo: (d) => pedir("/encargos", json("POST", d)),
   reasignarEncargo: (id, usuarioId) =>
     pedir(`/encargos/${id}/responsable`, json("PUT", { usuario_id: usuarioId })),

@@ -485,6 +485,7 @@ class EncargoCambio(BaseModel):
     """
     razon_social: str | None = None
     nit: str | None = None
+    grupo: str | None = None
     fecha_corte: date | None = None
     fecha_cierre_anterior: date | None = None
     fecha_corte_anterior: date | None = None
@@ -562,6 +563,15 @@ def abrir_encargo(e: EncargoNuevo, request: Request) -> dict:
 def listar_encargos(request: Request) -> list[dict]:
     u = _yo(request)
     return db.encargos(str(u["id"]), todos=u["rol"] == "ADMIN")
+
+
+@app.get("/grupos")
+def listar_grupos() -> list[str]:
+    """Los grupos que ya existen, para que el campo del formulario
+    autocomplete y la gente no termine con 'DAABON', 'Daabon' y 'daabon'
+    como tres grupos distintos. Case-insensitive: se devuelve la grafia
+    mas frecuente."""
+    return db.grupos_existentes()
 
 
 @app.get("/encargos/{encargo_id}")
@@ -644,7 +654,14 @@ def editar_encargo(encargo_id: str, c: EncargoCambio, request: Request) -> dict:
             raise HTTPException(
                 409, f"Ese NIT ya es de {otro['razon_social']}.")
 
-    if not campos and not cambia_razon and not cambia_nit:
+    # El grupo es texto libre: el frontend sugiere los existentes para
+    # evitar que "DAABON", "Daabon" y "daabon" terminen siendo tres
+    # grupos distintos en la lista. Vacio significa "sin grupo".
+    grupo_nuevo = (c.grupo or "").strip() or None
+    grupo_actual = (enc.get("grupo") or None)
+    cambia_grupo = c.grupo is not None and grupo_nuevo != grupo_actual
+
+    if not campos and not cambia_razon and not cambia_nit and not cambia_grupo:
         return {**enc, "sin_cambios": True}
 
     fechas = {k: campos.get(k, enc[k]) for k in
@@ -670,11 +687,15 @@ def editar_encargo(encargo_id: str, c: EncargoCambio, request: Request) -> dict:
                 for m in malos],
         })
 
-    if cambia_razon or cambia_nit:
+    if cambia_razon or cambia_nit or cambia_grupo:
         db.actualizar_cliente(
             str(enc["cliente_id"]),
             razon_social=razon if cambia_razon else None,
             nit=nit if cambia_nit else None,
+            grupo=grupo_nuevo if cambia_grupo else None,
+            # Vacio explicito desvincula del grupo; se distingue de "no
+            # tocar" porque c.grupo llega como "" en lugar de None.
+            borrar_grupo=cambia_grupo and grupo_nuevo is None,
         )
     if campos:
         db.actualizar_encargo(encargo_id, **campos)

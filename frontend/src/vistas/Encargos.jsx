@@ -20,11 +20,14 @@ export default function Encargos({ yo, onAbrir }) {
   // correo), y `pagina` corta de 20 en 20 para que ninguna pantalla
   // tenga que pintar 200 filas de golpe.
   const [buscar, setBuscar] = useState("");
+  const [grupoActivo, setGrupoActivo] = useState("");   // "" = todos
+  const [grupos, setGrupos] = useState([]);
   const [pagina, setPagina] = useState(0);
   const POR_PAGINA = 20;
 
   useEffect(() => { refrescar(); }, []);
-  useEffect(() => { setPagina(0); }, [buscar]);
+  useEffect(() => { api.grupos().then(setGrupos).catch(() => setGrupos([])); }, []);
+  useEffect(() => { setPagina(0); }, [buscar, grupoActivo]);
 
   useEffect(() => {
     if (yo?.rol !== "ADMIN") return;
@@ -62,6 +65,7 @@ export default function Encargos({ yo, onAbrir }) {
     setEd({
       nit: enc.nit ?? "",
       razon_social: enc.razon_social ?? "",
+      grupo: enc.grupo ?? "",
       responsable: enc.creado_por ?? "",
       estado: enc.estado ?? "ABIERTO",
       fecha_corte: enc.fecha_corte ?? "",
@@ -99,6 +103,7 @@ export default function Encargos({ yo, onAbrir }) {
       await api.editarEncargo(editando.id, {
         nit: ed.nit,
         razon_social: ed.razon_social,
+        grupo: ed.grupo,
         estado: ed.estado,
         fecha_corte: ed.fecha_corte,
         fecha_cierre_anterior: ed.fecha_cierre_anterior,
@@ -147,24 +152,56 @@ export default function Encargos({ yo, onAbrir }) {
           </div>
 
           {lista.length > 0 && (
-            <div className="mb-4 flex items-center gap-3">
-              <input
-                type="search"
-                value={buscar}
-                onChange={(ev) => setBuscar(ev.target.value)}
-                placeholder="Buscar por razón social o NIT…"
-                className="flex-1 rounded-md border border-regla
-                           bg-papel-alto px-3 py-2 text-sm"
-              />
-              {buscar && (
-                <button
-                  onClick={() => setBuscar("")}
-                  className="rotulo text-xs text-tinta-suave hover:text-marca"
-                >
-                  Limpiar
-                </button>
+            <>
+              {grupos.length > 0 && (
+                <div className="mb-3 flex flex-wrap items-center gap-2">
+                  <span className="rotulo mr-1 text-xs text-tinta-suave">
+                    Grupo
+                  </span>
+                  <button
+                    onClick={() => setGrupoActivo("")}
+                    className={`chip-filtro ${!grupoActivo ? "chip-filtro-activo" : ""}`}
+                  >
+                    Todos
+                  </button>
+                  {grupos.map((g) => (
+                    <button key={g}
+                      onClick={() => setGrupoActivo(grupoActivo === g ? "" : g)}
+                      className={`chip-filtro ${grupoActivo === g ? "chip-filtro-activo" : ""}`}
+                    >
+                      {g} ({lista.filter((e) =>
+                        (e.grupo ?? "").toLowerCase() === g.toLowerCase()).length})
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => setGrupoActivo("__SIN__")}
+                    className={`chip-filtro ${grupoActivo === "__SIN__" ? "chip-filtro-activo" : ""}`}
+                    title="Encargos sin grupo asignado"
+                  >
+                    Sin grupo ({lista.filter((e) => !e.grupo).length})
+                  </button>
+                </div>
               )}
-            </div>
+
+              <div className="mb-4 flex items-center gap-3">
+                <input
+                  type="search"
+                  value={buscar}
+                  onChange={(ev) => setBuscar(ev.target.value)}
+                  placeholder="Buscar por razón social o NIT…"
+                  className="flex-1 rounded-md border border-regla
+                             bg-papel-alto px-3 py-2 text-sm"
+                />
+                {buscar && (
+                  <button
+                    onClick={() => setBuscar("")}
+                    className="rotulo text-xs text-tinta-suave hover:text-marca"
+                  >
+                    Limpiar
+                  </button>
+                )}
+              </div>
+            </>
           )}
 
           {(() => {
@@ -172,13 +209,24 @@ export default function Encargos({ yo, onAbrir }) {
             // es mas rapido que ir y volver al servidor con cada tecla.
             const norm = (s) => (s ?? "").toString().toLowerCase().trim();
             const q = norm(buscar);
-            const filtrada = q
-              ? lista.filter(
-                  (e) =>
-                    norm(e.razon_social).includes(q) ||
-                    norm(e.nit).includes(q),
-                )
-              : lista;
+            // Chip de grupo + buscador se componen (no se excluyen): el
+            // filtro de grupo acota el universo, el buscador escarba
+            // dentro de ese universo.
+            let filtrada = lista;
+            if (grupoActivo === "__SIN__") {
+              filtrada = filtrada.filter((e) => !e.grupo);
+            } else if (grupoActivo) {
+              filtrada = filtrada.filter(
+                (e) => norm(e.grupo) === norm(grupoActivo),
+              );
+            }
+            if (q) {
+              filtrada = filtrada.filter(
+                (e) =>
+                  norm(e.razon_social).includes(q) ||
+                  norm(e.nit).includes(q),
+              );
+            }
             const paginas = Math.max(1, Math.ceil(filtrada.length / POR_PAGINA));
             const p = Math.min(pagina, paginas - 1);
             const desde = p * POR_PAGINA;
@@ -229,7 +277,17 @@ export default function Encargos({ yo, onAbrir }) {
                   >
                     <span className="min-w-0 flex-1">
                       <span className="block font-semibold">{e.razon_social}</span>
-                      <span className="cifra block text-xs text-tinta-suave">{e.nit}</span>
+                      <span className="cifra block text-xs text-tinta-suave">
+                        {e.nit}
+                        {e.grupo && (
+                          <span className="ml-2 inline-block rounded-full
+                                           border border-regla bg-papel-hondo
+                                           px-2 py-0.5 text-[10px] uppercase
+                                           tracking-wider">
+                            {e.grupo}
+                          </span>
+                        )}
+                      </span>
                     </span>
                     <span className="cifra text-sm">{fecha(e.fecha_corte)}</span>
                     {yo?.rol === "ADMIN" && (
@@ -405,8 +463,22 @@ export default function Encargos({ yo, onAbrir }) {
                        className="mt-1.5 w-full px-3 py-2 text-sm" />
               </label>
             </div>
+            <label className="block">
+              <span className="rotulo">Grupo <span className="text-tinta-suave">(opcional)</span></span>
+              <input value={ed.grupo}
+                     list="grupos-sugeridos"
+                     onChange={(e) => setEd({ ...ed, grupo: e.target.value })}
+                     placeholder="DAABON, DSAB, …"
+                     className="mt-1.5 w-full px-3 py-2 text-sm" />
+              <datalist id="grupos-sugeridos">
+                {grupos.map((g) => <option key={g} value={g} />)}
+              </datalist>
+              <span className="mt-1 block text-xs text-tinta-suave">
+                Agrupador del controlador o holding. Deje vacío para desvincular.
+              </span>
+            </label>
             <p className="-mt-1 text-xs text-tinta-suave">
-              NIT y razón social son del cliente: cambian en todos sus encargos.
+              NIT, razón social y grupo son del cliente: cambian en todos sus encargos.
             </p>
 
             <div className="grid gap-4 sm:grid-cols-2">

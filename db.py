@@ -139,6 +139,20 @@ def cliente_por_nit(nit: str) -> dict | None:
     return uno("SELECT * FROM core.cliente WHERE nit=%s", (nit,))
 
 
+def grupos_existentes() -> list[str]:
+    """Grupos ya registrados en core.cliente, en orden alfabetico.
+    Case-insensitive por el indice funcional, pero devuelve la grafia
+    mas comun para que el autocomplete sea estable."""
+    filas = varios(
+        """SELECT max(grupo) AS grupo, count(*) AS n
+           FROM core.cliente
+           WHERE grupo IS NOT NULL AND grupo <> ''
+           GROUP BY lower(grupo)
+           ORDER BY max(grupo)"""
+    )
+    return [f["grupo"] for f in filas]
+
+
 def crear_cliente(nit: str, razon_social: str, seudonimo: str) -> dict:
     return uno(
         """INSERT INTO core.cliente (nit, razon_social, seudonimo)
@@ -252,7 +266,7 @@ def guardar_parametros(encargo_id: str, pct_variacion, pct_trivialidad,
 
 def encargo(encargo_id: str) -> dict | None:
     return uno(
-        """SELECT e.*, cl.razon_social, cl.nit, cl.seudonimo
+        """SELECT e.*, cl.razon_social, cl.nit, cl.seudonimo, cl.grupo
            FROM core.encargo e JOIN core.cliente cl ON cl.id=e.cliente_id
            WHERE e.id=%s""",
         (encargo_id,),
@@ -272,14 +286,16 @@ def encargos(usuario_id: str | None = None, todos: bool = False) -> list[dict]:
     """
     if todos:
         return varios(
-            """SELECT e.*, cl.razon_social, cl.nit, u.nombre AS creado_por_nombre
+            """SELECT e.*, cl.razon_social, cl.nit, cl.grupo,
+                      u.nombre AS creado_por_nombre
                FROM core.encargo e
                JOIN core.cliente cl ON cl.id=e.cliente_id
                LEFT JOIN core.usuario u ON u.id=e.creado_por
                ORDER BY e.fecha_corte DESC"""
         )
     return varios(
-        """SELECT e.*, cl.razon_social, cl.nit, u.nombre AS creado_por_nombre
+        """SELECT e.*, cl.razon_social, cl.nit, cl.grupo,
+                  u.nombre AS creado_por_nombre
            FROM core.encargo e
            JOIN core.cliente cl ON cl.id=e.cliente_id
            LEFT JOIN core.usuario u ON u.id=e.creado_por
@@ -317,10 +333,17 @@ def actualizar_encargo(encargo_id: str, **campos: Any) -> dict | None:
                (*campos.values(), encargo_id))
 
 
-def actualizar_cliente(cliente_id: str, **campos) -> None:
-    """Cambia razon_social y/o nit del cliente. El NIT es UNIQUE: la
-    validacion de choque con otro cliente se hace en la capa superior."""
+def actualizar_cliente(cliente_id: str, borrar_grupo: bool = False,
+                       **campos) -> None:
+    """Cambia razon_social, nit y/o grupo del cliente. El NIT es UNIQUE:
+    la validacion de choque con otro cliente se hace en la capa superior.
+
+    `borrar_grupo=True` setea grupo=NULL (desvincula del grupo); se
+    distingue de "no tocar" porque un POST con el campo vacio quiere
+    decir "sin grupo", no "deja el que esta"."""
     campos = {k: v for k, v in campos.items() if v is not None}
+    if borrar_grupo:
+        campos["grupo"] = None
     if not campos:
         return
     sets = ", ".join(f"{k}=%s" for k in campos)
