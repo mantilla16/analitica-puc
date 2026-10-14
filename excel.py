@@ -591,10 +591,19 @@ def parsear(ruta: str | Path, perfil: dict, naturaleza: str,
                 # dos columnas: son mas especificas y el firmado solo
                 # existe para rellenarlas cuando no vienen.
                 imp = out.pop("importe_firmado", None)
-                if imp is not None and out.get("debito") in (None, 0) \
-                        and out.get("credito") in (None, 0):
-                    out["debito"] = imp if imp > 0 else 0
-                    out["credito"] = -imp if imp < 0 else 0
+                if imp is not None and not out.get("debito") \
+                        and not out.get("credito"):
+                    # a_numero devuelve el decimal como texto. Para decidir
+                    # el signo hay que pasarlo por Decimal, no comparar str
+                    # con int (TypeError silencioso que tumbaba el procesado
+                    # entero cuando la primera fila negativa llegaba).
+                    try:
+                        d = Decimal(imp)
+                    except (ArithmeticError, ValueError):
+                        d = None
+                    if d is not None:
+                        out["debito"] = f"{d:f}" if d > 0 else "0"
+                        out["credito"] = f"{-d:f}" if d < 0 else "0"
 
                 # Si el archivo no trae columna de secuencia (SAP y otros
                 # ERPs no la exportan: cada fila es su propio movimiento),
