@@ -59,7 +59,10 @@ export default function Encargos({ yo, onAbrir }) {
     }
   }
 
-  function abrirEdicion(enc) {
+  const [equipo, setEquipo] = useState([]);           // asignados al encargo editado
+  const [sumarUsuario, setSumarUsuario] = useState("");
+
+  async function abrirEdicion(enc) {
     setEditando(enc);
     setChoque(null);
     setEd({
@@ -72,6 +75,32 @@ export default function Encargos({ yo, onAbrir }) {
       fecha_cierre_anterior: enc.fecha_cierre_anterior ?? "",
       fecha_corte_anterior: enc.fecha_corte_anterior ?? "",
     });
+    try {
+      setEquipo(await api.equipoEncargo(enc.id));
+    } catch {
+      setEquipo([]);
+    }
+    setSumarUsuario("");
+  }
+
+  async function sumar() {
+    if (!sumarUsuario) return;
+    try {
+      await api.sumarAlEquipo(editando.id, sumarUsuario);
+      setEquipo(await api.equipoEncargo(editando.id));
+      setSumarUsuario("");
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function quitar(usuarioId) {
+    try {
+      await api.quitarDelEquipo(editando.id, usuarioId);
+      setEquipo(await api.equipoEncargo(editando.id));
+    } catch (err) {
+      setError(err.message);
+    }
   }
 
   /* Al mover el corte se recalculan las dos fechas comparativas, que es lo
@@ -513,7 +542,7 @@ export default function Encargos({ yo, onAbrir }) {
                   ))}
                 </select>
                 <span className="mt-1 block text-xs text-tinta-suave">
-                  Es quien lo ve y quien firma el papel.
+                  Es quien firma el papel.
                 </span>
               </label>
               <label className="block">
@@ -525,6 +554,60 @@ export default function Encargos({ yo, onAbrir }) {
                   <option value="CERRADO">Cerrado</option>
                 </select>
               </label>
+            </div>
+
+            {/* Equipo del encargo: cualquier auditor aqui tiene acceso.
+                El responsable (creador) tambien aparece y no se puede
+                quitar desde aqui -- para transferirlo se usa el campo
+                Responsable de arriba, que ademas cambia la firma. */}
+            <div>
+              <span className="rotulo">Equipo del encargo</span>
+              <p className="mt-1 text-xs text-tinta-suave">
+                Cada auditor en esta lista ve el encargo y puede trabajar en
+                él. El responsable firma el papel; los demás colaboran.
+              </p>
+              {equipo.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {equipo.map((p) => (
+                    <span key={p.usuario_id}
+                          className="inline-flex items-center gap-2
+                                     rounded-full border border-regla
+                                     bg-papel-hondo px-2.5 py-1 text-xs">
+                      <span className="font-medium">
+                        {p.nombre ?? p.usuario}
+                      </span>
+                      <span className="text-tinta-suave">{p.rol}</span>
+                      {p.rol !== "responsable" && (
+                        <button
+                          onClick={() => quitar(p.usuario_id)}
+                          title="Quitar del equipo"
+                          className="text-tinta-suave hover:text-rojo"
+                        >
+                          ×
+                        </button>
+                      )}
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div className="mt-3 flex gap-2">
+                <select value={sumarUsuario}
+                        onChange={(e) => setSumarUsuario(e.target.value)}
+                        className="flex-1 px-3 py-2 text-sm">
+                  <option value="">Sumar un auditor…</option>
+                  {usuarios
+                    .filter((u) => !equipo.some((p) => p.usuario_id === u.id))
+                    .map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.nombre ?? u.usuario}
+                      </option>
+                    ))}
+                </select>
+                <Boton onClick={sumar} disabled={!sumarUsuario}
+                       variante="contorno">
+                  Sumar
+                </Boton>
+              </div>
             </div>
 
             <label className="block">

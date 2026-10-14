@@ -284,6 +284,11 @@ def encargos(usuario_id: str | None = None, todos: bool = False) -> list[dict]:
 
     Un encargo sin dueño lo ve solo un ADMIN. Ocultarselo a todo el mundo
     por no saber de quien es equivaldria a perderlo.
+
+    Un encargo lo puede ver quien lo creo Y cualquier usuario asignado
+    al equipo (core.encargo_asignado). Antes solo veia el creador --
+    cuando un semi-senior o un junior entraba a trabajar un encargo le
+    tocaba pedirle al senior que compartiera pantalla.
     """
     if todos:
         return varios(
@@ -301,9 +306,51 @@ def encargos(usuario_id: str | None = None, todos: bool = False) -> list[dict]:
            JOIN core.cliente cl ON cl.id=e.cliente_id
            LEFT JOIN core.usuario u ON u.id=e.creado_por
            WHERE e.creado_por = %s
+              OR EXISTS (
+                   SELECT 1 FROM core.encargo_asignado ea
+                   WHERE ea.encargo_id = e.id AND ea.usuario_id = %s
+              )
            ORDER BY e.fecha_corte DESC""",
-        (usuario_id,),
+        (usuario_id, usuario_id),
     )
+
+
+def equipo_del_encargo(encargo_id: str) -> list[dict]:
+    """Las personas asignadas al equipo, con su rol y datos minimos
+    para pintarlas en una lista."""
+    return varios(
+        """SELECT ea.usuario_id, ea.rol, ea.asignado_en,
+                  u.usuario, u.nombre, u.correo, u.activo
+           FROM core.encargo_asignado ea
+           JOIN core.usuario u ON u.id = ea.usuario_id
+           WHERE ea.encargo_id = %s
+           ORDER BY ea.rol, u.nombre""",
+        (encargo_id,),
+    )
+
+
+def asignar_al_encargo(encargo_id: str, usuario_id: str,
+                       rol: str = "auditor") -> dict:
+    """Asigna el usuario al equipo del encargo. Idempotente: si ya
+    estaba, actualiza el rol -- no deja dos filas en silencio."""
+    return uno(
+        """INSERT INTO core.encargo_asignado (encargo_id, usuario_id, rol)
+           VALUES (%s, %s, %s)
+           ON CONFLICT (encargo_id, usuario_id)
+             DO UPDATE SET rol = EXCLUDED.rol
+           RETURNING *""",
+        (encargo_id, usuario_id, rol),
+    )
+
+
+def quitar_del_encargo(encargo_id: str, usuario_id: str) -> int:
+    """Quita al usuario del equipo. Devuelve filas afectadas."""
+    with conn() as c:
+        return c.execute(
+            "DELETE FROM core.encargo_asignado "
+            "WHERE encargo_id=%s AND usuario_id=%s",
+            (encargo_id, usuario_id),
+        ).rowcount
 
 
 def dueno_de_encargo(encargo_id: str) -> str | None:
@@ -315,14 +362,40 @@ def dueno_de_encargo(encargo_id: str) -> str | None:
 def reasignar_encargo(encargo_id: str, usuario_id: str, responsable: str) -> dict | None:
     """Cambia el dueño y el nombre visible del responsable en una sola
     escritura. `creado_por` es quien puede acceder; `responsable` se conserva
-    como la firma legible que muestran los entregables existentes."""
-    return uno(
-        """UPDATE core.encargo
-              SET creado_por=%s, responsable=%s
-            WHERE id=%s
-          RETURNING id, creado_por, responsable""",
-        (usuario_id, responsable, encargo_id),
-    )
+    como la firma legible que muestran los entregables existentes.
+
+    Tambien actualiza el equipo: el nuevo creado_por entra como
+    'responsable'. Si antes era 'auditor' pasa a 'responsable' (ON
+    CONFLICT); si no estaba, se agrega. El responsable anterior se
+    conserva en el equipo con rol 'auditor' -- borrarlo sin preguntar
+    tumbaria el acceso de alguien que puede estar en medio de un
+    archivo abierto."""
+    with conn() as c:
+        r = c.execute(
+            """UPDATE core.encargo
+                  SET creado_por=%s, responsable=%s
+                WHERE id=%s
+              RETURNING id, creado_por, responsable""",
+            (usuario_id, responsable, encargo_id),
+        ).fetchone()
+        # Degrada al responsable anterior a auditor (si estaba) y asciende
+        # al nuevo. Dos UPDATEs separados para que la restriccion CHECK
+        # del rol no choque en la transicion.
+        c.execute(
+            """UPDATE core.encargo_asignado
+                  SET rol='auditor'
+                WHERE encargo_id=%s AND rol='responsable'
+                  AND usuario_id<>%s""",
+            (encargo_id, usuario_id),
+        )
+        c.execute(
+            """INSERT INTO core.encargo_asignado (encargo_id, usuario_id, rol)
+               VALUES (%s, %s, 'responsable')
+               ON CONFLICT (encargo_id, usuario_id)
+                 DO UPDATE SET rol='responsable'""",
+            (encargo_id, usuario_id),
+        )
+    return r
 
 
 def actualizar_encargo(encargo_id: str, **campos: Any) -> dict | None:

@@ -51,6 +51,12 @@ export const api = {
   crearEncargo: (d) => pedir("/encargos", json("POST", d)),
   reasignarEncargo: (id, usuarioId) =>
     pedir(`/encargos/${id}/responsable`, json("PUT", { usuario_id: usuarioId })),
+  equipoEncargo: (id) => pedir(`/encargos/${id}/equipo`),
+  sumarAlEquipo: (id, usuarioId, rol = "auditor") =>
+    pedir(`/encargos/${id}/equipo`,
+          json("POST", { usuario_id: usuarioId, rol })),
+  quitarDelEquipo: (id, usuarioId) =>
+    pedir(`/encargos/${id}/equipo/${usuarioId}`, { method: "DELETE" }),
   editarEncargo: (id, d) => pedir(`/encargos/${id}`, json("PUT", d)),
   eliminarEncargo: (id) => pedir(`/encargos/${id}`, { method: "DELETE" }),
   checklist: (id) => pedir(`/encargos/${id}/checklist`),

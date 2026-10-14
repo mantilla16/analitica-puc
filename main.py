@@ -79,6 +79,8 @@ ACCIONES = [
     ("POST",   r"^/auth/logout$",                     "SALIDA",               "usuario"),
     ("POST",   r"^/encargos$",                        "ENCARGO_CREADO",       "encargo"),
     ("PUT",    r"^/encargos/[^/]+/responsable$",      "ENCARGO_REASIGNADO",   "encargo"),
+    ("POST",   r"^/encargos/[^/]+/equipo$",           "EQUIPO_SUMADO",        "encargo"),
+    ("DELETE", r"^/encargos/[^/]+/equipo/",           "EQUIPO_QUITADO",       "encargo"),
     ("PUT",    r"^/encargos/[^/]+$",                  "ENCARGO_EDITADO",      "encargo"),
     ("DELETE", r"^/encargos/[^/]+$",                  "ENCARGO_BORRADO",      "encargo"),
     ("POST",   r"^/encargos/[^/]+/cargas$",           "ARCHIVO_SUBIDO",       "carga"),
@@ -612,6 +614,69 @@ def reasignar_encargo(encargo_id: str, d: ReasignarEncargo,
         "destino_id": str(destino["id"]),
     }
     return {**(r or {}), "creado_por_nombre": destino["nombre"]}
+
+
+class EquipoAgregar(BaseModel):
+    usuario_id: str
+    rol: str = "auditor"
+
+
+@app.get("/encargos/{encargo_id}/equipo")
+def ver_equipo(encargo_id: str) -> list[dict]:
+    enc = db.encargo(encargo_id)
+    if not enc:
+        raise HTTPException(404, "Encargo no existe")
+    return db.equipo_del_encargo(encargo_id)
+
+
+@app.post("/encargos/{encargo_id}/equipo")
+def agregar_al_equipo(encargo_id: str, d: EquipoAgregar,
+                      request: Request) -> dict:
+    """Suma un auditor al equipo. Solo ADMIN. El rol declarado queda en
+    el papel; para esta iteracion no cambia permisos."""
+    _exigir_admin(request)
+    enc = db.encargo(encargo_id)
+    if not enc:
+        raise HTTPException(404, "Encargo no existe")
+    if d.rol not in ("responsable", "auditor", "revisor"):
+        raise HTTPException(422, "Rol debe ser responsable, auditor o revisor")
+    usr = db.usuario_por_id(d.usuario_id)
+    if not usr:
+        raise HTTPException(404, "El usuario elegido no existe")
+    if not usr["activo"]:
+        raise HTTPException(409, "No se puede asignar a un usuario inactivo")
+    r = db.asignar_al_encargo(encargo_id, str(usr["id"]), d.rol)
+    request.state.bitacora = {
+        "razon_social": enc["razon_social"],
+        "usuario": usr["usuario"], "rol": d.rol,
+    }
+    return {**r, "nombre": usr["nombre"], "correo": usr["correo"]}
+
+
+@app.delete("/encargos/{encargo_id}/equipo/{usuario_id}")
+def quitar_del_equipo(encargo_id: str, usuario_id: str,
+                      request: Request) -> dict:
+    """Quita un auditor del equipo. Solo ADMIN. No se puede quitar al
+    creado_por: para eso esta reasignar el encargo, que ademas cambia la
+    firma del papel. Dejar sin acceso al dueño original sin cambiar su
+    firma seria dejar un papel con un responsable que no entra a verlo."""
+    _exigir_admin(request)
+    enc = db.encargo(encargo_id)
+    if not enc:
+        raise HTTPException(404, "Encargo no existe")
+    if str(enc["creado_por"]) == str(usuario_id):
+        raise HTTPException(
+            409, "No puede quitar al creador del encargo. Para transferir "
+                 "la responsabilidad use Reasignar.")
+    n = db.quitar_del_encargo(encargo_id, usuario_id)
+    if n == 0:
+        raise HTTPException(404, "Ese usuario no estaba en el equipo")
+    usr = db.usuario_por_id(usuario_id)
+    request.state.bitacora = {
+        "razon_social": enc["razon_social"],
+        "usuario": (usr or {}).get("usuario", "desconocido"),
+    }
+    return {"ok": True}
 
 
 @app.put("/encargos/{encargo_id}")
