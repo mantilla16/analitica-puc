@@ -34,6 +34,29 @@ export default function Encargo({ encargoId, onVolver }) {
 
   useEffect(() => { refrescar().catch((e) => setError(e.message)); }, [refrescar]);
 
+  // Si la carga del encargo falla, se mostraba "Cargando..." para siempre
+  // porque `enc` seguia en null. El auditor queda mirando puntos
+  // suspensivos sin saber que paso. Primero el error visible, luego el
+  // "cargando" como fallback positivo.
+  if (error && !enc) {
+    return (
+      <div className="mx-auto max-w-3xl p-12">
+        <Aviso tono="error" titulo="No se pudo cargar el encargo">
+          <p>{error}</p>
+          <div className="mt-4 flex gap-2">
+            <Boton variante="contorno"
+                   onClick={() => { setError(null); refrescar().catch((e) => setError(e.message)); }}>
+              Reintentar
+            </Boton>
+            {onVolver && (
+              <Boton variante="texto" onClick={onVolver}>Volver</Boton>
+            )}
+          </div>
+        </Aviso>
+      </div>
+    );
+  }
+
   if (!enc) return <p className="p-12 text-sm text-tinta-suave">Cargando…</p>;
 
   const mats = enc.materialidades ?? [];
