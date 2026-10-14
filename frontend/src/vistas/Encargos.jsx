@@ -14,8 +14,17 @@ export default function Encargos({ yo, onAbrir }) {
   const [form, setForm] = useState({
     nit: "", razon_social: "", fecha_corte: "",
   });
+  // Un auditor con 20+ clientes del grupo DAABON tiene que llegar al que
+  // esta buscando sin recorrer una lista infinita. `buscar` filtra por
+  // razon social y por NIT (que es lo que la gente a veces pega del
+  // correo), y `pagina` corta de 20 en 20 para que ninguna pantalla
+  // tenga que pintar 200 filas de golpe.
+  const [buscar, setBuscar] = useState("");
+  const [pagina, setPagina] = useState(0);
+  const POR_PAGINA = 20;
 
   useEffect(() => { refrescar(); }, []);
+  useEffect(() => { setPagina(0); }, [buscar]);
 
   useEffect(() => {
     if (yo?.rol !== "ADMIN") return;
@@ -132,21 +141,86 @@ export default function Encargos({ yo, onAbrir }) {
 
       {!creando ? (
         <>
-          <div className="mb-4 flex items-center justify-between">
+          <div className="mb-4 flex items-center justify-between gap-4">
             <p className="rotulo">Encargos abiertos</p>
             <Boton onClick={() => setCreando(true)}>Nuevo encargo</Boton>
           </div>
 
-          {lista.length === 0 ? (
-            <div className="rounded-[12px] border border-dashed border-regla
-                            bg-papel-alto/60 px-6 py-16 text-center">
-              <p className="text-sm text-tinta-media">
-                Todavía no hay encargos. Cree el primero para empezar a cargar archivos.
-              </p>
+          {lista.length > 0 && (
+            <div className="mb-4 flex items-center gap-3">
+              <input
+                type="search"
+                value={buscar}
+                onChange={(ev) => setBuscar(ev.target.value)}
+                placeholder="Buscar por razón social o NIT…"
+                className="flex-1 rounded-md border border-regla
+                           bg-papel-alto px-3 py-2 text-sm"
+              />
+              {buscar && (
+                <button
+                  onClick={() => setBuscar("")}
+                  className="rotulo text-xs text-tinta-suave hover:text-marca"
+                >
+                  Limpiar
+                </button>
+              )}
             </div>
-          ) : (
-            <div className="space-y-2">
-              {lista.map((e) => (
+          )}
+
+          {(() => {
+            // Se filtra y se pagina localmente: con menos de ~500 encargos
+            // es mas rapido que ir y volver al servidor con cada tecla.
+            const norm = (s) => (s ?? "").toString().toLowerCase().trim();
+            const q = norm(buscar);
+            const filtrada = q
+              ? lista.filter(
+                  (e) =>
+                    norm(e.razon_social).includes(q) ||
+                    norm(e.nit).includes(q),
+                )
+              : lista;
+            const paginas = Math.max(1, Math.ceil(filtrada.length / POR_PAGINA));
+            const p = Math.min(pagina, paginas - 1);
+            const desde = p * POR_PAGINA;
+            const vista = filtrada.slice(desde, desde + POR_PAGINA);
+
+            if (lista.length === 0) {
+              return (
+                <div className="rounded-[12px] border border-dashed border-regla
+                                bg-papel-alto/60 px-6 py-16 text-center">
+                  <p className="text-sm text-tinta-media">
+                    Todavía no hay encargos. Cree el primero para empezar a cargar archivos.
+                  </p>
+                </div>
+              );
+            }
+            if (filtrada.length === 0) {
+              return (
+                <div className="rounded-[12px] border border-dashed border-regla
+                                bg-papel-alto/60 px-6 py-10 text-center">
+                  <p className="text-sm text-tinta-media">
+                    Ninguno coincide con <span className="cifra">{buscar}</span>.
+                  </p>
+                </div>
+              );
+            }
+
+            return (
+              <>
+                <div className="mb-3 flex items-center justify-between text-xs text-tinta-suave">
+                  <span>
+                    {filtrada.length === lista.length
+                      ? `${lista.length} encargos`
+                      : `${filtrada.length} de ${lista.length}`}
+                  </span>
+                  {paginas > 1 && (
+                    <span>
+                      Mostrando {desde + 1}–{Math.min(desde + POR_PAGINA, filtrada.length)}
+                    </span>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  {vista.map((e) => (
                 <div key={e.id}
                      className="panel tarjeta-activa flex w-full items-center gap-5 px-5 py-4">
                   <button
@@ -185,8 +259,32 @@ export default function Encargos({ yo, onAbrir }) {
                   </button>
                 </div>
               ))}
-            </div>
-          )}
+                </div>
+
+                {paginas > 1 && (
+                  <div className="mt-4 flex items-center justify-center gap-2">
+                    <button
+                      onClick={() => setPagina((n) => Math.max(0, n - 1))}
+                      disabled={p === 0}
+                      className="rotulo text-xs text-tinta-suave hover:text-marca disabled:opacity-30"
+                    >
+                      ← Anterior
+                    </button>
+                    <span className="cifra text-xs text-tinta-media">
+                      {p + 1} / {paginas}
+                    </span>
+                    <button
+                      onClick={() => setPagina((n) => Math.min(paginas - 1, n + 1))}
+                      disabled={p >= paginas - 1}
+                      className="rotulo text-xs text-tinta-suave hover:text-marca disabled:opacity-30"
+                    >
+                      Siguiente →
+                    </button>
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </>
       ) : (
         <form onSubmit={crear} className="max-w-lg">
