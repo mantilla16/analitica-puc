@@ -470,6 +470,7 @@ class EncargoNuevo(BaseModel):
     nit: str
     razon_social: str
     fecha_corte: date
+    grupo: str | None = None
 
 
 class ReasignarEncargo(BaseModel):
@@ -555,8 +556,10 @@ def abrir_encargo(e: EncargoNuevo, request: Request) -> dict:
                               "fecha_corte": e.fecha_corte,
                               "responsable": u["nombre"],
                               "usuario": u["usuario"]}
+    grupo = (e.grupo or "").strip() or None
     return S.abrir_encargo(e.nit, e.razon_social, e.fecha_corte,
-                           responsable=u["nombre"], creado_por=str(u["id"]))
+                           responsable=u["nombre"], creado_por=str(u["id"]),
+                           grupo=grupo)
 
 
 @app.get("/encargos")

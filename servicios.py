@@ -21,18 +21,24 @@ import reglas as R
 def abrir_encargo(nit: str, razon_social: str, fecha_corte: date,
                   responsable: str | None = None,
                   seudonimo: str | None = None,
-                  creado_por: str | None = None) -> dict:
+                  creado_por: str | None = None,
+                  grupo: str | None = None) -> dict:
     """Crea cliente y encargo, y siembra las tres materialidades vacías.
 
     Los valores los digita el auditor después: hay una materialidad por
     fase (planeación, ejecución, cierre) y él decide cuáles aplicar.
+
+    `grupo` solo se aplica cuando el cliente se crea aqui mismo: si ya
+    existia (otro encargo previo con el mismo NIT), no se pisa en
+    silencio su grupo guardado -- editarlo despues desde el modal es la
+    forma explicita de cambiarlo.
     """
     cli = db.cliente_por_nit(nit)
     if cli is None:
         seudo = seudonimo or (
             "CLIENTE_" + hashlib.sha256(nit.encode()).hexdigest()[:6].upper()
         )
-        cli = db.crear_cliente(nit, razon_social, seudo)
+        cli = db.crear_cliente(nit, razon_social, seudo, grupo=grupo)
 
     enc = db.encargo_por_corte(cli["id"], fecha_corte)
     if enc is None:
@@ -43,6 +49,7 @@ def abrir_encargo(nit: str, razon_social: str, fecha_corte: date,
     db.sembrar_materialidades(enc["id"])
 
     return {**enc, "razon_social": cli["razon_social"], "nit": cli["nit"],
+            "grupo": cli.get("grupo"),
             "materialidades": db.materialidades(enc["id"])}
 
 

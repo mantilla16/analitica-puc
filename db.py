@@ -153,11 +153,12 @@ def grupos_existentes() -> list[str]:
     return [f["grupo"] for f in filas]
 
 
-def crear_cliente(nit: str, razon_social: str, seudonimo: str) -> dict:
+def crear_cliente(nit: str, razon_social: str, seudonimo: str,
+                  grupo: str | None = None) -> dict:
     return uno(
-        """INSERT INTO core.cliente (nit, razon_social, seudonimo)
-           VALUES (%s,%s,%s) RETURNING *""",
-        (nit, razon_social, seudonimo),
+        """INSERT INTO core.cliente (nit, razon_social, seudonimo, grupo)
+           VALUES (%s,%s,%s,%s) RETURNING *""",
+        (nit, razon_social, seudonimo, grupo),
     )
 
 

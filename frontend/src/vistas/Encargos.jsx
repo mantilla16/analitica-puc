@@ -12,7 +12,7 @@ export default function Encargos({ yo, onAbrir }) {
   const [ed, setEd] = useState(null);               // sus campos
   const [choque, setChoque] = useState(null);       // insumos desalineados
   const [form, setForm] = useState({
-    nit: "", razon_social: "", fecha_corte: "",
+    nit: "", razon_social: "", fecha_corte: "", grupo: "",
   });
   // Un auditor con 20+ clientes del grupo DAABON tiene que llegar al que
   // esta buscando sin recorrer una lista infinita. `buscar` filtra por
@@ -357,6 +357,24 @@ export default function Encargos({ yo, onAbrir }) {
             <label className="block">
               <span className="rotulo">Razón social</span>
               <input {...campo("razon_social")} required placeholder="LIQUITECH S.A.S." className={`${campo("razon_social").className} mt-1`} />
+            </label>
+
+            <label className="block">
+              <span className="rotulo">
+                Grupo <span className="text-tinta-suave">(opcional)</span>
+              </span>
+              <input {...campo("grupo")}
+                     list="grupos-sugeridos-nuevo"
+                     placeholder="DAABON, DSAB, …"
+                     className={`${campo("grupo").className} mt-1`} />
+              <datalist id="grupos-sugeridos-nuevo">
+                {grupos.map((g) => <option key={g} value={g} />)}
+              </datalist>
+              <span className="mt-1 block text-xs text-tinta-suave">
+                Agrupador del controlador o holding. Solo se aplica si es
+                un cliente nuevo; si ya existe, conserva el grupo que
+                tenía (edítelo desde el modal si quiere cambiarlo).
+              </span>
             </label>
 
             <label className="block">
