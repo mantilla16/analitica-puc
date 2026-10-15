@@ -20,7 +20,24 @@ DSN = os.getenv(
     "postgresql://postgres:postgres@localhost:5432/auditoria_puc",
 )
 
-pool = ConnectionPool(DSN, min_size=1, max_size=8, open=False)
+# Statement timeout: ninguna consulta debe correr mas de 90 segundos.
+# Antes una query mal escrita podia quedarse horas corriendo mientras los
+# siguientes requests esperaban en el pool. Equinorte tuvo 7 queries en
+# paralelo del mismo papel, una llevaba 5 HORAS activa. Si una query
+# demora mas de minuto y medio es un bug (indice faltante, self-JOIN
+# cuadratico): mejor matarla y que el request falle con un mensaje claro
+# que dejar al servidor zombi. El timeout se setea en el `search_path`
+# de cada conexion al salir del pool.
+STATEMENT_TIMEOUT_MS = 90_000
+
+
+def _configurar(c: psycopg.Connection) -> None:
+    with c.cursor() as cur:
+        cur.execute(f"SET statement_timeout = {STATEMENT_TIMEOUT_MS}")
+
+
+pool = ConnectionPool(DSN, min_size=1, max_size=8, open=False,
+                      configure=_configurar)
 
 
 def abrir() -> None:
@@ -926,19 +943,31 @@ def cuadre_documentos(carga_id: str, limite: int = 100) -> dict:
 
     # Las cuentas que quedan contaminadas: son exactamente aquellas donde el
     # cruce contra movimientos no puede concluir nada.
+    #
+    # El self-JOIN original (CTE "malos" + JOIN de vuelta a staging) hacia
+    # DOS pasadas sobre la tabla y encima casteaba text->numeric en cada
+    # row de ambas pasadas. En Agroingenium con ~70k movimientos la query
+    # llevaba 5 HORAS en un pid, con otras 7 haciendo cola en el pool. Un
+    # window function hace lo mismo en UNA pasada: la suma por documento se
+    # calcula sobre la particion de num_doc y se filtra en la segunda capa.
     cuentas = varios(
-        f"""WITH malos AS (
-                SELECT num_doc
-                {base}
-                GROUP BY num_doc
-                HAVING sum(debito::numeric - credito::numeric) <> 0)
-            SELECT left(m.codigo_puc, 4) AS cuenta, count(*) AS lineas,
-                   sum(abs(m.debito::numeric - m.credito::numeric)) AS monto
-              FROM raw.movimiento_staging m
-              JOIN malos ON malos.num_doc = m.num_doc
-             WHERE m.carga_id=%s AND m.codigo_puc IS NOT NULL
+        """WITH stats AS (
+                SELECT codigo_puc,
+                       debito::numeric  AS debito,
+                       credito::numeric AS credito,
+                       sum((debito::numeric) - (credito::numeric))
+                         OVER (PARTITION BY num_doc) AS doc_diff
+                  FROM raw.movimiento_staging
+                 WHERE carga_id=%s
+                   AND num_doc IS NOT NULL AND num_doc <> ''
+                   AND codigo_puc IS NOT NULL)
+            SELECT left(codigo_puc, 4) AS cuenta,
+                   count(*) AS lineas,
+                   sum(abs(debito - credito)) AS monto
+              FROM stats
+             WHERE doc_diff <> 0
              GROUP BY 1 ORDER BY 3 DESC LIMIT 50""",
-        (carga_id, carga_id),
+        (carga_id,),
     )
 
     return {**tot, "lineas_sin_documento": sin_doc,
