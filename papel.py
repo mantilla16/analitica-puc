@@ -458,29 +458,56 @@ def _gates(encargo_id: str, d: dict) -> list[dict]:
             "verificadas contra sí mismas.",
         ))
     else:
+        # Antes se iteraba cuenta por cuenta llamando a evidencia_cuenta,
+        # que ademas recomputaba variaciones() de cero: para un encargo con
+        # 40 cuentas significativas eran ~200 queries secuenciales + 40
+        # recomputos de la variacion, y el papel se quedaba "Armando..." sin
+        # llegar a responder. Aqui todo baja a dos queries fijas:
+        # signos por cuenta y totales de movimiento agrupados por prefijo.
         revisadas, cuadran, no_cuadran, redondeos = 0, 0, [], []
         tolerancia = A._cop(A.TOLERANCIA_CUADRE)
-        for f in d["filas"]:
-            if not f["significativa"]:
-                continue
-            ev = A.evidencia_cuenta(encargo_id, d["fase"], f["cuenta"])
-            c = ev.get("cuadre") if ev.get("listo") else None
-            if not c:
-                continue
-            revisadas += 1
-            fila = {"cuenta": f["cuenta"], "nombre": f["nombre"],
-                    "contra": c["contra"], "esperado": c["esperado"],
-                    "neto_movimientos": c["neto"],
-                    "diferencia": c["diferencia"]}
-            if c["cuadra"]:
-                cuadran += 1
-                # Cuadra dentro de la tolerancia pero no exacto: se declara.
-                # Una tolerancia que se aplica en silencio es lo mismo que no
-                # haber corrido el control.
-                if c.get("por_redondeo"):
-                    redondeos.append(fila)
-            else:
-                no_cuadran.append(fila)
+        significativas = [f for f in d["filas"] if f["significativa"]]
+        if significativas:
+            cuentas = [f["cuenta"] for f in significativas]
+            act_id = cargas.get("BAL_ACTUAL")
+            mov_id = cargas.get("MOV_ACTUAL")
+            signos_filas = db.varios(
+                """SELECT codigo_puc, signo FROM core.balance
+                   WHERE carga_id=%s AND nivel='Cuenta'
+                     AND codigo_puc = ANY(%s)""",
+                (act_id, cuentas),
+            )
+            signos = {f["codigo_puc"]: f["signo"] for f in signos_filas}
+            totales_filas = db.varios(
+                """SELECT left(codigo_puc, 4) AS cuenta,
+                          count(*) AS n,
+                          coalesce(sum(debito::numeric),  0) AS debito,
+                          coalesce(sum(credito::numeric), 0) AS credito
+                   FROM raw.movimiento_staging
+                   WHERE carga_id=%s AND left(codigo_puc, 4) = ANY(%s)
+                   GROUP BY left(codigo_puc, 4)""",
+                (mov_id, cuentas),
+            )
+            totales_por_cuenta = {t["cuenta"]: t for t in totales_filas}
+
+            for f in significativas:
+                tot = totales_por_cuenta.get(f["cuenta"])
+                if not tot:
+                    continue           # cuenta sin movimientos cargados
+                c = A._cuadre_movimientos(f, tot, signos.get(f["cuenta"], 1))
+                if not c:
+                    continue
+                revisadas += 1
+                fila = {"cuenta": f["cuenta"], "nombre": f["nombre"],
+                        "contra": c["contra"], "esperado": c["esperado"],
+                        "neto_movimientos": c["neto"],
+                        "diferencia": c["diferencia"]}
+                if c["cuadra"]:
+                    cuadran += 1
+                    if c.get("por_redondeo"):
+                        redondeos.append(fila)
+                else:
+                    no_cuadran.append(fila)
         gates.append(_control(
             "G03", "M", "Cruce con movimientos (fuente independiente)",
             "NO_EJECUTADO" if revisadas == 0 else "OK" if not no_cuadran else "FALLA",
