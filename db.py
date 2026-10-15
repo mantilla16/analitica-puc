@@ -377,6 +377,25 @@ def dueno_de_encargo(encargo_id: str) -> str | None:
     return str(f["creado_por"]) if f and f["creado_por"] else None
 
 
+def puede_ver_encargo(encargo_id: str, usuario_id: str) -> bool:
+    """Un auditor puede ver el encargo si lo creo O si esta en el equipo
+    (core.encargo_asignado). El middleware de permisos revisaba solo
+    creado_por: los auditores asignados despues eran bloqueados con
+    'este encargo es de otro auditor' aunque los acabaran de sumar al
+    equipo. ADMIN se decide aparte, aqui ni se consulta."""
+    f = uno(
+        """SELECT 1
+             FROM core.encargo e
+             LEFT JOIN core.encargo_asignado ea
+                    ON ea.encargo_id = e.id AND ea.usuario_id = %s
+            WHERE e.id = %s
+              AND (e.creado_por = %s OR ea.usuario_id IS NOT NULL)
+            LIMIT 1""",
+        (usuario_id, encargo_id, usuario_id),
+    )
+    return f is not None
+
+
 def reasignar_encargo(encargo_id: str, usuario_id: str, responsable: str) -> dict | None:
     """Cambia el dueño y el nombre visible del responsable en una sola
     escritura. `creado_por` es quien puede acceder; `responsable` se conserva

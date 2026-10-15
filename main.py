@@ -144,12 +144,17 @@ def _sin_acceso_al_encargo(u: dict, ruta: str) -> str | None:
     if not encargo_id:
         return None
 
+    # El acceso ya no es 1-a-1: además del creado_por, cualquier auditor en
+    # el equipo del encargo (core.encargo_asignado) puede verlo. Antes el
+    # middleware preguntaba solo por el dueño y bloqueaba a quien se
+    # sumara después al equipo con "este encargo es de otro auditor",
+    # aunque la UI del admin ya le hubiera dado acceso.
+    if db.puede_ver_encargo(encargo_id, str(u["id"])):
+        return None
     dueno = db.dueno_de_encargo(encargo_id)
     if dueno is None:
         return "Este encargo no tiene responsable asignado; pídalo a un administrador"
-    if dueno != str(u["id"]):
-        return "Este encargo es de otro auditor"
-    return None
+    return "Este encargo no está asignado a su usuario"
 
 
 @app.middleware("http")
