@@ -26,18 +26,19 @@ DSN = os.getenv(
 # paralelo del mismo papel, una llevaba 5 HORAS activa. Si una query
 # demora mas de minuto y medio es un bug (indice faltante, self-JOIN
 # cuadratico): mejor matarla y que el request falle con un mensaje claro
-# que dejar al servidor zombi. El timeout se setea en el `search_path`
-# de cada conexion al salir del pool.
+# que dejar al servidor zombi.
+#
+# El timeout va como parametro libpq -c en la DSN, no como un callback de
+# pool.configure: el callback existe desde psycopg_pool 3.0 pero su API
+# cambio entre menores y provoca que un deploy a una version distinta
+# tumbe el arranque entero. `options` es un parametro estandar que ha
+# funcionado desde que existe libpq.
 STATEMENT_TIMEOUT_MS = 90_000
 
-
-def _configurar(c: psycopg.Connection) -> None:
-    with c.cursor() as cur:
-        cur.execute(f"SET statement_timeout = {STATEMENT_TIMEOUT_MS}")
-
-
-pool = ConnectionPool(DSN, min_size=1, max_size=8, open=False,
-                      configure=_configurar)
+pool = ConnectionPool(
+    DSN, min_size=1, max_size=8, open=False,
+    kwargs={"options": f"-c statement_timeout={STATEMENT_TIMEOUT_MS}"},
+)
 
 
 def abrir() -> None:
