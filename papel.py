@@ -599,11 +599,21 @@ def _riesgo(gates: list[dict], previos: list[dict], d: dict) -> dict:
 def papel_trabajo(encargo_id: str, fase: str | None = None) -> dict:
     """El papel completo. Puede tardar: el cruce con movimientos consulta
     la evidencia de cada cuenta seleccionada."""
+    import logging
+    import time
+    log = logging.getLogger("papel")
+    t0 = time.perf_counter()
+    def ping(etapa: str) -> None:
+        log.info("papel[%s] %s %.0fms", encargo_id[:8], etapa,
+                 (time.perf_counter() - t0) * 1000)
+
     enc = db.encargo(encargo_id)
     if not enc:
         return {"listo": False, "motivo": "El encargo no existe."}
+    ping("encargo")
 
     d = A.variaciones(encargo_id, fase)
+    ping("variaciones")
     if not d["listo"]:
         sin_promover = d.get("sin_promover") or []
         return {
@@ -617,10 +627,10 @@ def papel_trabajo(encargo_id: str, fase: str | None = None) -> dict:
             "sin_promover": sin_promover,
         }
 
-    contrato = _contrato_datos(encargo_id)
-    previos = _controles_previos(enc, contrato)
-    gates = _gates(encargo_id, d)
-    riesgo = _riesgo(gates, previos, d)
+    contrato = _contrato_datos(encargo_id); ping("contrato")
+    previos = _controles_previos(enc, contrato); ping("previos")
+    gates = _gates(encargo_id, d); ping("gates")
+    riesgo = _riesgo(gates, previos, d); ping("riesgo")
 
     hallazgos = db.varios(
         """SELECT h.*, c.tipo FROM core.hallazgo h
@@ -628,6 +638,17 @@ def papel_trabajo(encargo_id: str, fase: str | None = None) -> dict:
            WHERE h.encargo_id = %s ORDER BY h.detectado_en DESC LIMIT 200""",
         (encargo_id,),
     )
+    ping("hallazgos")
+
+    cedula = A.resumen_clases(encargo_id, "BAL_ACTUAL"); ping("cedula")
+    observaciones = {o["codigo_puc"]: o
+                     for o in A.observaciones_guardadas(encargo_id, d["fase"])}
+    ping("observaciones")
+    conclusion = C.armar(enc, contrato, gates, previos, riesgo, d); ping("conclusion")
+    traza_eventos = db.bitacora(encargo_id=encargo_id, limite=300)
+    ping("bitacora")
+    traza_obs = db.historia_observaciones_ia(enc["cliente_id"])
+    ping("historia_ia")
 
     return {
         "listo": True,
@@ -648,21 +669,20 @@ def papel_trabajo(encargo_id: str, fase: str | None = None) -> dict:
         "contrato_datos": contrato,
         "controles_previos": previos,
         "gates": gates,
-        "cedula_sumaria": A.resumen_clases(encargo_id, "BAL_ACTUAL"),
+        "cedula_sumaria": cedula,
         "comparativo": d,
         # El análisis redactado por el modelo, indexado por cuenta, para que
         # la cédula de selección pueda mostrarlo junto a la cifra que explica.
         # Viaja con su procedencia -- modelo, versión, si el auditor lo
         # instruyó, si sus cifras se verificaron -- porque un texto de IA sin
         # trazabilidad no es papel de trabajo.
-        "observaciones": {o["codigo_puc"]: o
-                          for o in A.observaciones_guardadas(encargo_id, d["fase"])},
+        "observaciones": observaciones,
         "hallazgos": hallazgos,
         "marcas": MARCAS,
         "riesgo": riesgo,
-        "conclusion": C.armar(enc, contrato, gates, previos, riesgo, d),
+        "conclusion": conclusion,
         "trazabilidad": {
-            "eventos": db.bitacora(encargo_id=encargo_id, limite=300),
-            "observaciones_ia": db.historia_observaciones_ia(enc["cliente_id"]),
+            "eventos": traza_eventos,
+            "observaciones_ia": traza_obs,
         },
     }
