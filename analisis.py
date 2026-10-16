@@ -156,20 +156,33 @@ def variaciones(encargo_id: str, fase: str | None = None) -> dict:
 
     par = db.parametros(encargo_id)
     fase = fase or par.get("fase_activa") or "PLANEACION"
-    mat = db.materialidad_de_fase(encargo_id, fase)
+    fila_mat = db.materialidad_de_fase(encargo_id, fase)
+    res = R.resolver_materialidad(fila_mat)
 
-    aplica = bool(mat and mat.get("aplicar") and mat.get("valor"))
-    umbral = Decimal(mat["valor"]) if aplica else None
-
+    # El umbral de "Monto" es la materialidad de DESEMPENO, no la global.
+    # Antes se usaba la global directo, que equivale a un desempeno del
+    # 100%: deja fuera del alcance justo las variaciones que, sumadas por
+    # debajo del umbral, pueden llegar a ser materiales.
+    #
     # Los dos criterios se pueden apagar por encargo. Con el error trivial
     # apagado vale 0, así que las comparaciones `>= trivial` dejan de
     # filtrar y el criterio de porcentaje queda absoluto: cualquier
     # variación que cruce el porcentaje se reporta, por pequeña que sea.
     usa_var = par.get("aplica_variacion", True)
     usa_triv = par.get("aplica_trivialidad", True)
-    pct_triv = Decimal(par.get("pct_trivialidad") or 5)
-    trivial = (umbral * pct_triv / 100) if (umbral and usa_triv) else Decimal(0)
+    aplica = res["aplica"]
+    umbral, trivial = R.umbrales_seleccion(res, usa_triv)
     pct_var = Decimal(par.get("pct_variacion") or 20)
+    # Se conserva la llave para los lectores viejos (conclusion, excel): es
+    # el % del trivial sobre la global de ESTA fase, no ya del encargo.
+    pct_triv = res["trivial"]["pct"]
+
+    # Se conservan todas las llaves de la fila (nombre, valor, aplicar,
+    # aprobado_por...) que ya leian papel y frontend, y se agregan las tres
+    # cifras resueltas y la fase.
+    mat = dict(fila_mat or {}, fase=fase, **{
+        "global": res["global"], "desempeno": res["desempeno"],
+        "trivial": res["trivial"], "aplica": aplica})
 
     act = _saldos_cuenta(act_id)
     cie = _saldos_cuenta(cie_id)
@@ -351,7 +364,109 @@ def detalle_cuenta(encargo_id: str, codigo: str) -> dict:
         )
 
     return {"codigo": codigo, "hijos": hijos,
-            "movimientos": movimientos, "patrones": patrones}
+            "movimientos": movimientos, "patrones": patrones,
+            "movimientos_vs_anterior": _comparacion_de_cuenta(
+                movimientos_comparados(encargo_id), codigo)}
+
+
+# =====================================================================
+# MOVIMIENTOS CONTRA EL AÑO ANTERIOR
+# =====================================================================
+
+def _comparar_cargas(act_id: str | None, ant_id: str | None,
+                     fecha_corte, fecha_corte_anterior, c=None) -> dict:
+    """El nucleo de movimientos_comparados, separado de la lectura del
+    encargo para poder validarlo con cargas sembradas (validar_motor pasa
+    `c`, su conexion con la transaccion sin confirmar)."""
+    (a_ini, a_fin), (b_ini, b_fin) = R.ventanas_movimientos(
+        fecha_corte, fecha_corte_anterior)
+    base = {"ventana_actual": {"desde": a_ini.isoformat(), "hasta": a_fin.isoformat()},
+            "ventana_anterior": {"desde": b_ini.isoformat(), "hasta": b_fin.isoformat()}}
+
+    faltan = [n for n, cid in (("los movimientos del periodo (MOV_ACTUAL)", act_id),
+                               ("los movimientos del año anterior (MOV_ANTERIOR)", ant_id))
+              if not cid]
+    if faltan:
+        # No se compara contra ceros: un año anterior sin archivo no es un
+        # año sin movimientos, y tratarlo asi haria ver cada cuenta como
+        # "crecio 100%".
+        return {"disponible": False,
+                "motivo": f"No se cargaron {' ni '.join(faltan)}: la comparación "
+                          "de movimientos contra el año anterior no se ejecutó.",
+                **base, "por_cuenta": {}}
+
+    actual = db.movimientos_por_cuenta(act_id, a_ini, a_fin, c=c)
+    anterior = db.movimientos_por_cuenta(ant_id, b_ini, b_fin, c=c)
+    return {"disponible": True, "motivo": None, **base,
+            "por_cuenta": R.comparar_movimientos(actual, anterior)}
+
+
+def movimientos_comparados(encargo_id: str) -> dict:
+    """Movimientos del periodo (1-ene al corte) contra la MISMA ventana del
+    año anterior, por cuenta. Dos queries agrupadas en total, una por carga,
+    sin importar cuantas cuentas haya.
+
+    No se llama desde variaciones(): ese calculo corre en cada pantalla y
+    esta comparacion solo la necesitan quienes la muestran.
+    """
+    enc = db.encargo(encargo_id)
+    if not enc:
+        return {"disponible": False, "motivo": "El encargo no existe.",
+                "ventana_actual": None, "ventana_anterior": None,
+                "por_cuenta": {}}
+    return _comparar_cargas(carga_de(encargo_id, "MOV_ACTUAL"),
+                            carga_de(encargo_id, "MOV_ANTERIOR"),
+                            enc["fecha_corte"], enc["fecha_corte_anterior"])
+
+
+def _comparacion_de_cuenta(mc: dict, codigo: str) -> dict:
+    """La comparacion de UNA cuenta, a partir del dict ya calculado. El
+    calculo se hace una vez y se reparte, nunca por cuenta."""
+    return {"disponible": mc["disponible"], "motivo": mc["motivo"],
+            "ventana_actual": mc["ventana_actual"],
+            "ventana_anterior": mc["ventana_anterior"],
+            "cuenta": (mc.get("por_cuenta") or {}).get(codigo[:4])}
+
+
+def _ventana_txt(v: dict | None) -> str | None:
+    return f"{v['desde']} a {v['hasta']}" if v else None
+
+
+def _movimientos_para_ia(mc: dict | None, codigo: str) -> dict:
+    """La comparacion de una cuenta, con las cifras ya en formato de pesos.
+
+    Si no esta disponible solo se dice eso: sin cifras no hay nada que el
+    modelo pueda copiar, y la regla del prompt le prohibe mencionar el año
+    anterior en ese caso.
+    """
+    if not mc or not mc.get("disponible"):
+        return {"disponible": False,
+                "motivo": (mc or {}).get("motivo")
+                or "No hay comparación de movimientos contra el año anterior."}
+    x = (mc.get("por_cuenta") or {}).get(codigo[:4])
+    salida = {"disponible": True,
+              "ventana_actual": _ventana_txt(mc["ventana_actual"]),
+              "ventana_anterior": _ventana_txt(mc["ventana_anterior"])}
+    if not x:
+        # Disponible pero sin una sola linea en ninguna de las dos ventanas:
+        # es un dato (la cuenta no se movio), no una ausencia.
+        salida.update({"movimientos_actual": 0, "movimientos_anterior": 0,
+                       "neto_actual": _cop(0), "neto_anterior": _cop(0)})
+        return salida
+    salida.update({
+        "movimientos_actual": x["actual"]["n"],
+        "movimientos_anterior": x["anterior"]["n"],
+        "debito_actual": _cop(x["actual"]["debito"]),
+        "credito_actual": _cop(x["actual"]["credito"]),
+        "neto_actual": _cop(x["actual"]["neto"]),
+        "debito_anterior": _cop(x["anterior"]["debito"]),
+        "credito_anterior": _cop(x["anterior"]["credito"]),
+        "neto_anterior": _cop(x["anterior"]["neto"]),
+        "diferencia_neto": _cop(x["delta_neto"]),
+        "diferencia_neto_pct": x["delta_neto_pct"],
+        "diferencia_movimientos": x["delta_n"],
+    })
+    return salida
 
 
 # =====================================================================
@@ -480,10 +595,15 @@ def _direccion(var: Decimal) -> str:
 
 
 def _entrada_observacion(fila: dict, patrones: list[dict],
-                         auxiliares: list[dict]) -> dict:
+                         auxiliares: list[dict],
+                         movimientos_vs_anterior: dict | None = None) -> dict:
     """Solo lo ya calculado: nada que el modelo tenga que inferir con
     aritmética propia. Sin razón social ni NIT del cliente -- no le hace
-    falta al modelo para explicar la variación de una cuenta."""
+    falta al modelo para explicar la variación de una cuenta.
+
+    `movimientos_vs_anterior` llega ya formateado (_movimientos_para_ia).
+    Es opcional para que observaciones_guardadas pueda armar la entrada
+    solo para cotejar cifras, sin pagar la comparacion."""
     return {
         "moneda": "COP (pesos colombianos)",
         "cuenta": fila["cuenta"],
@@ -504,10 +624,17 @@ def _entrada_observacion(fila: dict, patrones: list[dict],
             for p in patrones
         ],
         "composicion_auxiliar": auxiliares,
+        "movimientos_vs_anterior": (
+            movimientos_vs_anterior if movimientos_vs_anterior is not None
+            else {"disponible": False,
+                  "motivo": "No se consultó la comparación de movimientos."}),
     }
 
 
-def _entrada_para(d: dict, encargo_id: str, fila: dict) -> dict:
+def _entrada_para(d: dict, encargo_id: str, fila: dict,
+                  mc: dict | None = None) -> dict:
+    """`mc` es movimientos_comparados ya calculado. En lote se calcula una
+    vez y se reparte; si no llega, se calcula aqui (una cuenta suelta)."""
     act_id = carga_de(encargo_id, "BAL_ACTUAL")
     comparativo_id = (carga_de(encargo_id, "BAL_CIERRE_ANTERIOR") if fila["clase"] <= "3"
                       else carga_de(encargo_id, "BAL_CORTE_ANTERIOR"))
@@ -515,12 +642,16 @@ def _entrada_para(d: dict, encargo_id: str, fila: dict) -> dict:
     patrones = _patrones_cuenta(mov_id, fila["cuenta"])
     auxiliares = _auxiliares_variacion(act_id, comparativo_id, fila["cuenta"],
                                        fila["variacion"])
-    return _entrada_observacion(fila, patrones, auxiliares)
+    if mc is None:
+        mc = movimientos_comparados(encargo_id)
+    return _entrada_observacion(fila, patrones, auxiliares,
+                                _movimientos_para_ia(mc, fila["cuenta"]))
 
 
 def _generar_y_guardar(d: dict, encargo_id: str, cliente_id: str, fase: str,
                        fila: dict, instruccion: str | None = None,
-                       usuario: str | None = None) -> dict:
+                       usuario: str | None = None,
+                       mc: dict | None = None) -> dict:
     """Redacta y persiste. Si viene `instruccion`, se le pasa al modelo
     junto con el texto de la versión anterior, para que ajuste en vez de
     empezar de cero -- y queda una versión nueva, sin borrar la previa."""
@@ -529,7 +660,7 @@ def _generar_y_guardar(d: dict, encargo_id: str, cliente_id: str, fase: str,
         anterior = db.observacion_ia_ultima(encargo_id, fase, fila["cuenta"])
         previo = anterior["texto"] if anterior else None
 
-    entrada = _entrada_para(d, encargo_id, fila)
+    entrada = _entrada_para(d, encargo_id, fila, mc)
     r = ia.redactar_observacion(entrada, instruccion=instruccion, previo=previo)
 
     if r.get("error"):
@@ -617,6 +748,10 @@ def evidencia_cuenta(encargo_id: str, fase: str, codigo: str) -> dict:
         "patrones": patrones,
         "movimientos": movimientos,
         "cuadre": _cuadre_movimientos(fila, totales, signo),
+        # Las mismas cifras que recibio la IA, para contrastar lo que afirme
+        # sobre el año anterior.
+        "movimientos_vs_anterior": _movimientos_para_ia(
+            movimientos_comparados(encargo_id), codigo),
     }
 
 
@@ -753,10 +888,14 @@ def observaciones_lote(encargo_id: str, fase: str, codigos: list[str],
 
     enc = db.encargo(encargo_id)
     cliente_id = enc["cliente_id"]
+    # Una sola vez para todo el lote: son dos queries agrupadas, y
+    # repetirlas por cuenta en paralelo seria multiplicar la carga sobre
+    # movimiento_staging por el tamaño del lote.
+    mc = movimientos_comparados(encargo_id)
 
     def _una(fila: dict) -> dict:
         return _generar_y_guardar(d, encargo_id, cliente_id, fase, fila,
-                                  usuario=usuario)
+                                  usuario=usuario, mc=mc)
 
     with ThreadPoolExecutor(max_workers=len(seleccion)) as ex:
         return list(ex.map(_una, seleccion))

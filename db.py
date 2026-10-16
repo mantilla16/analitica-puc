@@ -15,6 +15,8 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
+import reglas as R
+
 DSN = os.getenv(
     "AUDITORIA_DSN",
     "postgresql://postgres:postgres@localhost:5432/auditoria_puc",
@@ -200,9 +202,12 @@ def crear_encargo(cliente_id: str, fecha_corte: date, cierre_ant: date,
     )
 
 
+# (fase, nombre, porcentaje de referencia vs planeacion). El desempeno y el
+# trivial arrancan en 75% y 5% de la global en las tres fases: son los
+# valores usuales y el auditor los ajusta dentro de los rangos de reglas.py.
 MATERIALIDADES_DEFECTO = [
     ("PLANEACION", "Materialidad de planeación", None),
-    ("EJECUCION",  "Materialidad de desempeño", 75.00),
+    ("EJECUCION",  "Materialidad de ejecución",  75.00),
     ("CIERRE",     "Materialidad de cierre",     50.00),
 ]
 
@@ -212,49 +217,77 @@ def sembrar_materialidades(encargo_id: str) -> None:
     with conn() as c:
         for fase, nombre, pct in MATERIALIDADES_DEFECTO:
             c.execute(
-                """INSERT INTO core.materialidad (encargo_id, fase, nombre, porcentaje)
-                   VALUES (%s,%s,%s,%s) ON CONFLICT (encargo_id, fase) DO NOTHING""",
-                (encargo_id, fase, nombre, pct),
+                """INSERT INTO core.materialidad
+                     (encargo_id, fase, nombre, porcentaje,
+                      desempeno_modo, desempeno_pct, trivial_modo, trivial_pct)
+                   VALUES (%s,%s,%s,%s,'PCT',%s,'PCT',%s)
+                   ON CONFLICT (encargo_id, fase) DO NOTHING""",
+                (encargo_id, fase, nombre, pct,
+                 R.DESEMPENO_PCT_DEFECTO, R.TRIVIAL_PCT_DEFECTO),
             )
         c.commit()
 
 
 def materialidades(encargo_id: str) -> list[dict]:
-    return varios(
+    """Ya en la forma del API (`global` + dicts `desempeno`/`trivial`
+    resueltos): la leen el endpoint de materialidades, ver encargo y la
+    creacion del encargo, y las tres deben ver exactamente lo mismo."""
+    filas = varios(
         """SELECT m.*, f.nombre AS fase_nombre, f.orden
            FROM core.materialidad m JOIN core.fase f ON f.fase = m.fase
            WHERE m.encargo_id=%s ORDER BY f.orden""",
         (encargo_id,),
     )
+    return [R.materialidad_api(f) for f in filas]
 
 
 def materialidad_de_fase(encargo_id: str, fase: str) -> dict | None:
-    return uno(
-        "SELECT * FROM core.materialidad WHERE encargo_id=%s AND fase=%s",
+    return R.materialidad_api(uno(
+        """SELECT m.*, f.nombre AS fase_nombre, f.orden
+           FROM core.materialidad m JOIN core.fase f ON f.fase = m.fase
+           WHERE m.encargo_id=%s AND m.fase=%s""",
         (encargo_id, fase),
-    )
+    ))
 
 
-def guardar_materialidad(encargo_id: str, fase: str, valor, porcentaje,
-                         aplicar: bool, nombre, usuario) -> dict:
+def guardar_materialidad(encargo_id: str, fase: str, *, global_, porcentaje,
+                         aplicar: bool, nombre, desempeno: dict,
+                         trivial: dict, usuario) -> dict | None:
+    """Escribe la global y las dos cifras derivadas YA resueltas (modo, pct
+    y valor) y deja la version en el historial.
+
+    Se guardan pct y valor aunque uno se derive del otro: si despues cambia
+    la global, el historial debe mostrar lo que el auditor vio y aprobo, no
+    una cifra recalculada sobre una global que no existia entonces.
+    """
+    datos = (global_, porcentaje, aplicar,
+             desempeno["modo"], desempeno["pct"], desempeno["valor"],
+             trivial["modo"], trivial["pct"], trivial["valor"])
     with conn() as c:
         fila = c.execute(
             """UPDATE core.materialidad
                   SET valor=%s, porcentaje=%s, aplicar=%s,
+                      desempeno_modo=%s, desempeno_pct=%s, desempeno_valor=%s,
+                      trivial_modo=%s, trivial_pct=%s, trivial_valor=%s,
                       nombre=coalesce(%s, nombre),
                       aprobado_por=%s, actualizado=now()
                 WHERE encargo_id=%s AND fase=%s RETURNING *""",
-            (valor, porcentaje, aplicar, nombre, usuario, encargo_id, fase),
+            datos + (nombre, usuario, encargo_id, fase),
         ).fetchone()
         if fila:
             c.execute(
                 """INSERT INTO core.materialidad_historia
-                     (encargo_id, fase, nombre, valor, porcentaje, aplicar, cambiado_por)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s)""",
-                (encargo_id, fase, fila["nombre"], valor, porcentaje, aplicar, usuario),
+                     (encargo_id, fase, nombre, valor, porcentaje, aplicar,
+                      desempeno_modo, desempeno_pct, desempeno_valor,
+                      trivial_modo, trivial_pct, trivial_valor, cambiado_por)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                (encargo_id, fase, fila["nombre"]) + datos + (usuario,),
             )
         c.commit()
-        return fila
+    if not fila:
+        return None
+    # Con fase_nombre/orden, igual que un elemento de materialidades().
+    return materialidad_de_fase(encargo_id, fase)
 
 
 def fases() -> list[dict]:
@@ -266,21 +299,22 @@ def fijar_fase(encargo_id: str, fase: str) -> None:
 
 
 def parametros(encargo_id: str) -> dict:
+    # pct_trivialidad ya no se lee: el trivial es por fase, en
+    # core.materialidad (migracion 22). La columna queda solo como historia.
     return uno(
-        """SELECT fase_activa, pct_variacion, pct_trivialidad,
+        """SELECT fase_activa, pct_variacion,
                   aplica_variacion, aplica_trivialidad
            FROM core.encargo WHERE id=%s""", (encargo_id,)) or {}
 
 
-def guardar_parametros(encargo_id: str, pct_variacion, pct_trivialidad,
+def guardar_parametros(encargo_id: str, pct_variacion,
                        aplica_variacion: bool, aplica_trivialidad: bool) -> None:
     ejecutar(
         """UPDATE core.encargo
-              SET pct_variacion=%s, pct_trivialidad=%s,
+              SET pct_variacion=%s,
                   aplica_variacion=%s, aplica_trivialidad=%s
             WHERE id=%s""",
-        (pct_variacion, pct_trivialidad, aplica_variacion,
-         aplica_trivialidad, encargo_id))
+        (pct_variacion, aplica_variacion, aplica_trivialidad, encargo_id))
 
 
 def encargo(encargo_id: str) -> dict | None:
@@ -904,6 +938,52 @@ def borrar_hallazgos_de_carga(carga_id: str) -> None:
     limpian, cada reintento acumula una copia mas de cada hallazgo y la
     lista crece sin motivo real."""
     ejecutar("DELETE FROM core.hallazgo WHERE carga_id=%s", (carga_id,))
+
+
+# UNA query por carga, agrupada por cuenta (4 digitos). Nunca una por
+# cuenta en bucle: eso fue lo que dejo una consulta corriendo 5 horas.
+#
+# La ventana se filtra comparando TEXTO ISO ('YYYY-MM-DD'), no con
+# fecha::date: un solo valor basura en la columna (texto libre de un export)
+# haria fallar el cast y tumbaria la consulta entera, y Postgres no garantiza
+# el orden de evaluacion del WHERE como para protegerlo con un filtro previo.
+# En ISO el orden alfabetico es el cronologico, asi que el resultado es el
+# mismo; lo que no tenga forma de fecha simplemente queda fuera.
+SQL_MOVIMIENTOS_POR_CUENTA = """
+    SELECT left(codigo_puc, 4) AS cuenta,
+           count(*) AS n,
+           coalesce(sum(debito::numeric),  0) AS debito,
+           coalesce(sum(credito::numeric), 0) AS credito
+      FROM raw.movimiento_staging
+     WHERE carga_id = %s
+       AND codigo_puc IS NOT NULL
+       AND fecha ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+       AND left(fecha, 10) BETWEEN %s AND %s
+     GROUP BY 1
+"""
+
+
+def movimientos_por_cuenta(carga_id: str, desde: date, hasta: date,
+                           c: psycopg.Connection | None = None
+                           ) -> dict[str, dict]:
+    """{cuenta: {n, debito, credito, neto}} de los movimientos de la carga
+    entre `desde` y `hasta` (inclusive).
+
+    `c` permite correrla dentro de una transaccion ajena: validar_motor
+    siembra movimientos sin confirmarlos y necesita verlos desde la misma
+    conexion.
+    """
+    p = (carga_id, desde.isoformat(), hasta.isoformat())
+    if c is None:
+        filas = varios(SQL_MOVIMIENTOS_POR_CUENTA, p)
+    else:
+        filas = c.execute(SQL_MOVIMIENTOS_POR_CUENTA, p).fetchall()
+    salida = {}
+    for f in filas:
+        deb, cre = Decimal(f["debito"]), Decimal(f["credito"])
+        salida[f["cuenta"]] = {"n": int(f["n"]), "debito": deb, "credito": cre,
+                               "neto": deb - cre}
+    return salida
 
 
 def cuadre_documentos(carga_id: str, limite: int = 100) -> dict:

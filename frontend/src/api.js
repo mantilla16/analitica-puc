@@ -13,7 +13,10 @@ async function pedir(ruta, opciones = {}) {
   try { cuerpo = texto ? JSON.parse(texto) : null; } catch { cuerpo = texto; }
   if (!r.ok) {
     if (r.status === 401) alExpirar();
-    const e = new Error(cuerpo?.detail ? JSON.stringify(cuerpo.detail) : r.statusText);
+    // Un 422 de validación trae el mensaje en español como texto: se muestra
+    // tal cual, sin las comillas que le pondría JSON.stringify.
+    const det = cuerpo?.detail;
+    const e = new Error(typeof det === "string" ? det : det ? JSON.stringify(det) : r.statusText);
     e.estado = r.status;
     e.detalle = cuerpo?.detail ?? cuerpo;
     throw e;

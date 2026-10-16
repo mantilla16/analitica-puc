@@ -57,6 +57,14 @@ def _num(v):
         return v
 
 
+def _modo(cifra: dict) -> str:
+    """Como se digito la cifra. Importa para revisar: un % fijo se mueve
+    solo si cambia la global; un valor en pesos no."""
+    if not cifra or (cifra.get("pct") is None and cifra.get("valor") is None):
+        return "sin definir"
+    return "valor en pesos" if cifra.get("modo") == "VALOR" else "% de la global"
+
+
 def _hoja(wb, nombre, titulo, subtitulo=None):
     h = wb.create_sheet(nombre[:31])
     h["A1"] = titulo
@@ -132,6 +140,9 @@ def construir(p: dict) -> bytes:
 
     id_ = p["identificacion"]
     d = p["comparativo"]
+    mat = d.get("materialidad") or {}
+    des = mat.get("desempeno") or {}
+    triv = mat.get("trivial") or {}
 
     # ------------------------------------------------------- 1. portada
     h = _hoja(wb, "Papel", id_["papel"], id_["norma"])
@@ -142,18 +153,20 @@ def construir(p: dict) -> bytes:
         ("Comparativo clases 1-3", id_["cierre_anterior"]),
         ("Comparativo clases 4-7", id_["corte_anterior"]),
         ("Fase", id_["fase"]), ("Responsable", id_["responsable"] or "—"),
-        ("Materialidad aplicada", _num(d.get("umbral"))),
+        ("Materialidad global", _num(mat.get("global"))),
+        ("Materialidad de desempeño (umbral de selección)", _num(d.get("umbral"))),
+        ("Error trivial", _num(d.get("trivialidad"))),
         ("Generado", datetime.now().strftime("%d/%m/%Y %H:%M")),
         ("Versión del papel", p["version"]),
     ]:
         h.cell(row=fila, column=1, value=et).font = _rotulo
         c = h.cell(row=fila, column=2, value=v)
         c.font = _normal
-        if et == "Materialidad aplicada" and isinstance(v, float):
+        if et.startswith(("Materialidad", "Error trivial")) and isinstance(v, float):
             c.number_format = PESOS
         fila += 1
 
-    h.column_dimensions["A"].width = 26
+    h.column_dimensions["A"].width = 44
     h.column_dimensions["B"].width = 46
 
     fila += 1
@@ -318,19 +331,39 @@ def construir(p: dict) -> bytes:
               "del año anterior. Marca Δ. Saldos EN SU NATURALEZA: positivo = del "
               "lado normal de la cuenta (columna Nat.: D débito, C crédito); "
               "negativo = del lado contrario. No es el signo del ERP.")
+    # Movimientos contra la misma ventana del año anterior: solo cuando la
+    # comparacion corrio. Columnas vacias en un papel sin MOV_ANTERIOR se
+    # leerian como "no hubo movimientos", que es otra cosa.
+    mc = p.get("movimientos_comparados") or {}
+    con_mov = bool(mc.get("disponible"))
+    por_cta = mc.get("por_cuenta") or {}
+
+    def _mov(f):
+        if not con_mov:
+            return []
+        x = por_cta.get(f["cuenta"][:4])
+        if not x:
+            return [0.0, 0.0, 0.0]
+        return [_num(x["actual"]["neto"]), _num(x["anterior"]["neto"]),
+                _num(x["delta_neto"])]
+
     _tabla(h, 4,
         ["Cuenta", "Nombre", "Clase", "Nat.", "Comparado contra",
          "Saldo actual (en su naturaleza)",
          "Saldo comparativo (en su naturaleza)", "Variación", "%", "Motivo",
-         "Marca"],
+         "Marca"]
+        + (["Mov. neto periodo", "Mov. neto año ant.", "Δ mov."] if con_mov else []),
         [[f["cuenta"], f["nombre"], f["clase"], f.get("naturaleza", ""),
           f["regla"],
           _num(f["saldo_actual"]), _num(f["saldo_comparativo"]),
           _num(f["variacion"]), _num(f["variacion_pct"]),
-          f["motivo"] or "", "Δ" if f["significativa"] else ""]
+          f["motivo"] or "", "Δ" if f["significativa"] else ""] + _mov(f)
          for f in d["filas"]],
-        anchos=[11, 40, 8, 6, 30, 22, 22, 20, 10, 18, 8],
-        formatos={6: PESOS, 7: PESOS, 8: PESOS, 9: PORC}, principal=True)
+        anchos=[11, 40, 8, 6, 30, 22, 22, 20, 10, 18, 8]
+        + ([20, 20, 20] if con_mov else []),
+        formatos={6: PESOS, 7: PESOS, 8: PESOS, 9: PORC,
+                  **({12: PESOS, 13: PESOS, 14: PESOS} if con_mov else {})},
+        principal=True)
 
     # ------------------------------------------- 5.b análisis del modelo
     # Hoja aparte y no una columna del comparativo: el texto es largo y en
@@ -406,8 +439,13 @@ def construir(p: dict) -> bytes:
     h = _hoja(wb, "Alcance", "Alcance y selección")
     fila = 4
     for et, v, fmt in [
-        ("Materialidad de la fase", _num(d.get("umbral")), PESOS),
+        ("Materialidad global de la fase", _num(mat.get("global")), PESOS),
+        ("Materialidad de desempeño (umbral)", _num(d.get("umbral")), PESOS),
+        ("Desempeño: % de la global", _num(des.get("pct")), PORC),
+        ("Desempeño: digitada como", _modo(des), None),
         ("Error trivial", _num(d.get("trivialidad")), PESOS),
+        ("Trivial: % de la global", _num(triv.get("pct")), PORC),
+        ("Trivial: digitado como", _modo(triv), None),
         ("Variación porcentual", _num(d.get("pct_variacion")), PORC),
         ("Cuentas comparadas", d["total_cuentas"], None),
         ("Cuentas seleccionadas", d["significativas"], None),
@@ -425,7 +463,8 @@ def construir(p: dict) -> bytes:
     fila += 1
     if d.get("residuo_supera_umbral"):
         h.cell(row=fila, column=1,
-               value="El conjunto no seleccionado supera la materialidad de la fase: "
+               value="El conjunto no seleccionado supera la materialidad de "
+                     "desempeño de la fase: "
                      "el alcance debe ampliarse o dejarse constancia de por qué se "
                      "acepta ese residuo.").font = Font(name="Calibri", size=10,
                                                         bold=True, color="B56A00")

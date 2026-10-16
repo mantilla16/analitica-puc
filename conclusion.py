@@ -25,7 +25,7 @@ from __future__ import annotations
 import analisis as A
 
 MOTIVO_EXPLICADO = {
-    "Monto": "su variación superó la materialidad",
+    "Monto": "su variación superó la materialidad de desempeño",
     "Cuenta nueva": "nacieron en el periodo, sin saldo comparativo",
     "Cuenta cerrada": "quedaron en cero habiendo tenido saldo antes",
     "Comportamiento": "se movieron por encima del porcentaje fijado aunque no "
@@ -53,6 +53,12 @@ def _fecha(v) -> str:
         return v.strftime("%d/%m/%Y")
     t = str(v)[:10]
     return f"{t[8:10]}/{t[5:7]}/{t[0:4]}" if len(t) == 10 else t
+
+
+def _pct(v) -> str:
+    """75.00 -> '75%', 12.5 -> '12,5%'. Sin ceros de relleno en la prosa."""
+    t = f"{float(v):.2f}".rstrip("0").rstrip(".").replace(".", ",")
+    return f"{t}%"
 
 
 def _plural(n: int, singular: str, plural: str) -> str:
@@ -113,18 +119,35 @@ def _como_defini_el_alcance(d: dict) -> list[str]:
     if not d.get("aplica"):
         return []
 
-    criterios = [f"una variación en pesos igual o mayor a la materialidad de "
-                 f"la fase, {A._cop(d['umbral'])}"]
+    # Se dice contra QUE cifra se selecciono: la de desempeno, no la global.
+    # Un lector que vea solo "la materialidad" asumiria la global y creeria
+    # que el alcance fue mas estrecho de lo que fue.
+    mat = d.get("materialidad") or {}
+    des = mat.get("desempeno") or {}
+    triv = mat.get("trivial") or {}
+    criterios = [
+        f"una variación en pesos igual o mayor a la materialidad de desempeño "
+        f"de la fase, {A._cop(d['umbral'])}"
+        + (f" ({_pct(des.get('pct'))} de la materialidad global de "
+           f"{A._cop(mat.get('global'))}"
+           + (", digitada en pesos" if des.get("modo") == "VALOR" else "")
+           + ")" if mat.get("global") is not None and des.get("pct") is not None
+           else "")]
     if d.get("aplica_variacion", True):
         criterios.append(f"una variación porcentual desde el "
                          f"{d['pct_variacion']}%")
     else:
         criterios.append("el criterio de variación porcentual desactivado por "
                          "decisión del encargo")
-    if d.get("aplica_trivialidad", True):
-        criterios.append(f"un error trivial del {d['pct_trivialidad']}% de la "
-                         f"materialidad, {A._cop(d['trivialidad'])}, para no "
-                         f"marcar cuentas por cifras irrelevantes")
+    if d.get("aplica_trivialidad", True) and triv.get("valor") is not None:
+        criterios.append(f"un error trivial de {A._cop(d['trivialidad'])}"
+                         + (f", el {_pct(triv.get('pct'))} de la materialidad "
+                            f"global" if triv.get("pct") is not None else "")
+                         + ", para no marcar cuentas por cifras irrelevantes")
+    elif d.get("aplica_trivialidad", True):
+        criterios.append("sin error trivial definido para la fase, de modo que "
+                         "cualquier variación que cruce el porcentaje se "
+                         "reporta por pequeña que sea")
     else:
         criterios.append("sin error trivial, de modo que cualquier variación "
                          "que cruce el porcentaje se reporta por pequeña que sea")
@@ -209,11 +232,11 @@ def _que_deje_por_fuera(d: dict) -> list[str]:
 
     if d.get("residuo_supera_umbral"):
         return [base + (
-            "por ENCIMA de la materialidad de la fase. Ese conjunto podría "
+            "por ENCIMA de la materialidad de desempeño de la fase. Ese conjunto podría "
             "contener un error material por acumulación aunque ninguna cuenta "
             "lo alcance por separado, de modo que el alcance debe ampliarse o "
             "dejarse constancia razonada de por qué se acepta ese residuo.")]
-    return [base + ("por debajo de la materialidad de la fase. Ni "
+    return [base + ("por debajo de la materialidad de desempeño de la fase. Ni "
                     "individualmente ni sumadas alcanzan a ser materiales.")]
 
 
@@ -272,7 +295,7 @@ def armar(enc: dict, contrato: list[dict], gates: list[dict],
         estado = "NO_CONCLUYENTE"
         cierre = (
             "No me es posible concluir. La fase no tiene materialidad "
-            "aplicada, de modo que ninguna cuenta quedó seleccionada: el "
+            "aplicada (global y de desempeño definidas), de modo que ninguna cuenta quedó seleccionada: el "
             "comparativo está calculado, pero sin umbral no hay alcance "
             "definido, y sin alcance no hay conclusión que sostener.")
     else:
@@ -286,7 +309,7 @@ def armar(enc: dict, contrato: list[dict], gates: list[dict],
         if d.get("residuo_supera_umbral"):
             salvedades.append(
                 "el conjunto de variaciones que no seleccioné supera la "
-                "materialidad de la fase")
+                "materialidad de desempeño de la fase")
         if alertas:
             salvedades.append(
                 "quedaron en alerta " + " y ".join(

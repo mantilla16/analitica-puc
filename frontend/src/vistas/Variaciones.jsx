@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState } from "react";
 import { api, monto, entero, fecha } from "../api";
 import { Aviso, Punteo } from "../comp/Piezas";
+import CompMov, { pctTexto } from "../comp/CompMov";
 
 /** Convierte el desglose del residuo en el argumento redactado, con las
  * cuentas más grandes del grupo que sí importa (el que no llegó al umbral
@@ -185,6 +186,12 @@ export default function Variaciones({ encargoId }) {
     );
   }
 
+  // La columna solo existe si el servidor pudo comparar: sin el insumo, una
+  // columna de guiones diría "sin cambio" cuando en realidad es "sin dato".
+  const mov = d.movimientos_comparados;
+  const hayMov = mov?.disponible === true;
+  const nCols = hayMov ? 9 : 8;
+
   const filas =
     seccion === "TODAS" ? d.filas
     : seccion === "MARCADAS" ? d.filas.filter((f) => f.significativa)
@@ -223,20 +230,37 @@ export default function Variaciones({ encargoId }) {
           </p>
         </div>
         <div>
-          <p className="rotulo">{d.materialidad?.nombre ?? "Materialidad"}</p>
-          <p className="cifra mt-1 text-lg">{d.umbral ? monto(d.umbral) : "—"}</p>
+          <p className="rotulo">{d.materialidad?.nombre ?? "Materialidad"} · global</p>
+          <p className="cifra mt-1 text-lg">
+            {d.materialidad?.global ? monto(d.materialidad.global) : "—"}
+          </p>
+        </div>
+        <div>
+          <p className="rotulo">Desempeño · umbral de monto</p>
+          <p className="cifra mt-1 text-lg">
+            {(d.materialidad?.desempeno?.valor ?? d.umbral) ? monto(d.materialidad?.desempeno?.valor ?? d.umbral) : "—"}
+          </p>
+          {d.materialidad?.desempeno?.pct != null && (
+            <p className="text-xs text-tinta-suave">
+              {pctTexto(d.materialidad.desempeno.pct)} de la global
+            </p>
+          )}
         </div>
         <div>
           <p className="rotulo">
-            Error trivial {d.aplica_trivialidad === false
-              ? "· desactivado"
-              : `· ${String(d.pct_trivialidad)}%`}
+            Error trivial {d.aplica_trivialidad === false ? "· desactivado" : ""}
           </p>
           <p className="cifra mt-1 text-lg">
             {d.aplica_trivialidad === false
               ? "—"
-              : d.trivialidad ? monto(d.trivialidad) : "—"}
+              : (d.materialidad?.trivial?.valor ?? d.trivialidad)
+                ? monto(d.materialidad?.trivial?.valor ?? d.trivialidad) : "—"}
           </p>
+          {d.aplica_trivialidad !== false && d.materialidad?.trivial?.pct != null && (
+            <p className="text-xs text-tinta-suave">
+              {pctTexto(d.materialidad.trivial.pct)} de la global
+            </p>
+          )}
         </div>
         <div>
           <p className="rotulo">
@@ -279,7 +303,7 @@ export default function Variaciones({ encargoId }) {
           <p><strong className="text-tinta">Para revisar:</strong> todas las
           cuentas seleccionadas por alguno de los criterios siguientes.</p>
           <p><strong className="text-tinta">Monto:</strong> la variación absoluta
-          alcanza o supera la materialidad de ejecución de la fase.</p>
+          alcanza o supera la materialidad de desempeño de la fase.</p>
           <p><strong className="text-tinta">Comportamiento:</strong> supera el
           porcentaje configurado y no es una variación trivial.</p>
           <p><strong className="text-tinta">Nuevas / Cerradas:</strong> pasan de
@@ -296,14 +320,14 @@ export default function Variaciones({ encargoId }) {
         <Aviso tono="alerta" titulo="El alcance puede quedar corto">
           Las variaciones no seleccionadas suman{" "}
           <span className="cifra">{monto(d.residuo_no_seleccionado)}</span>, por
-          encima del umbral de ejecución. Conviene bajar el umbral o dejar
+          encima de la materialidad de desempeño. Conviene bajar el umbral o dejar
           constancia de por qué no.
         </Aviso>
       ) : (
         <p className="text-xs text-tinta-suave">
           Lo no seleccionado suma{" "}
           <span className="cifra">{monto(d.residuo_no_seleccionado)}</span>, por
-          debajo de la materialidad de esta fase.
+          debajo de la materialidad de desempeño de esta fase.
         </p>
       )}
 
@@ -380,13 +404,14 @@ export default function Variaciones({ encargoId }) {
               cifras, así que necesita más aire o se monta sobre el %. */}
           <colgroup>
             <col className="w-[8%]" />
-            <col className="w-[18%]" />
+            <col className="w-[16%]" />
             <col className="w-[14%]" />
             <col className="w-[14%]" />
             <col className="w-[16%]" />
             <col className="w-[8%]" />
             <col className="w-[12%]" />
             <col className="w-[10%]" />
+            {hayMov && <col className="w-[8%]" />}
           </colgroup>
           <thead className="border-b border-regla bg-papel-hondo">
             <tr className="rotulo text-left">
@@ -398,12 +423,18 @@ export default function Variaciones({ encargoId }) {
               <th className="px-3 py-2 text-right font-normal">%</th>
               <th className="px-3 py-2 font-normal">Motivo</th>
               <th className="px-3 py-2 font-normal">IA</th>
+              {hayMov && (
+                <th className="px-3 py-2 text-right font-normal"
+                    title="Cambio del neto de movimientos (1-ene al corte) contra la misma ventana del año anterior">
+                  Δ mov.
+                </th>
+              )}
             </tr>
           </thead>
           <tbody>
             {filas.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-3 py-10 text-center text-tinta-suave">
+                <td colSpan={nCols} className="px-3 py-10 text-center text-tinta-suave">
                   Ninguna cuenta quedó marcada para revisión. Quite el filtro para verlas todas.
                 </td>
               </tr>
@@ -461,10 +492,11 @@ export default function Variaciones({ encargoId }) {
                       </button>
                     </div>
                   </td>
+                  {hayMov && <CeldaDeltaMov c={mov.por_cuenta?.[f.cuenta]} />}
                 </tr>
                 {obs[f.cuenta] && (
                   <tr className="border-b border-regla-fina bg-papel-hondo">
-                    <td colSpan={8} className="px-3 py-3">
+                    <td colSpan={nCols} className="px-3 py-3">
                       {/* Una observacion escrita sobre otras cifras puede
                           afirmar lo contrario de lo que paso. Se avisa antes
                           del texto, no despues. */}
@@ -546,8 +578,8 @@ export default function Variaciones({ encargoId }) {
 
       <div className="text-xs leading-relaxed text-tinta-suave">
         <p>
-          <strong className="text-tinta-media">Monto</strong> supera el umbral de
-          ejecución · <strong className="text-tinta-media">Comportamiento</strong>{" "}
+          <strong className="text-tinta-media">Monto</strong> supera la materialidad de
+          desempeño · <strong className="text-tinta-media">Comportamiento</strong>{" "}
           varía más del {String(d.pct_variacion)}% con monto no trivial ·{" "}
           <strong className="text-tinta-media">Naturaleza</strong> saldo contrario
           al esperado para la cuenta.
@@ -563,17 +595,38 @@ export default function Variaciones({ encargoId }) {
       )}
 
       {evidencia && (
-        <Evidencia e={evidencia} onCerrar={() => setEvidencia(null)} />
+        <Evidencia e={evidencia} mov={mov} onCerrar={() => setEvidencia(null)} />
       )}
     </div>
+  );
+}
+
+/** Δ del neto de movimientos de una cuenta contra el año anterior, con los
+ *  dos netos en el tooltip. "—" cuando la cuenta no tiene base de comparación. */
+function CeldaDeltaMov({ c }) {
+  const n = c?.delta_neto_pct;
+  const tip = c
+    ? `Actual ${monto(c.actual?.neto ?? 0)} · año anterior ${monto(c.anterior?.neto ?? 0)} · Δ ${monto(c.delta_neto)}`
+    : "Sin movimientos en ninguno de los dos periodos";
+  return (
+    <td title={tip}
+        className={`cifra whitespace-nowrap px-3 py-2 text-right text-xs ${
+          Number(n) < 0 ? "text-rojo" : "text-tinta-suave"}`}>
+      {n === null || n === undefined ? "—" : pctTexto(n)}
+    </td>
   );
 }
 
 /** Los datos crudos detrás de una cuenta. Existe para poder contrastar lo
  *  que afirma la IA contra lo que de verdad hay en los movimientos: el
  *  texto generado es un punto de partida, no evidencia. */
-function Evidencia({ e, onCerrar }) {
+function Evidencia({ e, mov, onCerrar }) {
   const d = e.datos;
+  // El servidor entrega la comparación para todas las cuentas en el
+  // comparativo; se recorta a la de esta evidencia.
+  const comp = mov
+    ? { ...mov, cuenta: mov.por_cuenta?.[String(e.codigo).slice(0, 4)] ?? null }
+    : d?.movimientos_vs_anterior;
   const c = d?.cuadre;
 
   return (
@@ -642,6 +695,9 @@ function Evidencia({ e, onCerrar }) {
                 pestaña Archivos.
               </Aviso>
             )}
+
+            {/* ------------------------------ contra el año anterior */}
+            <CompMov datos={comp} />
 
             {/* ------------------------------------------- por auxiliar */}
             {d.auxiliares?.length > 0 && (

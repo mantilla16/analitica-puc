@@ -242,7 +242,8 @@ def _excluido(carga_id: str) -> list[dict]:
 
 # ================================================ controles antes de cruzar
 
-def _controles_previos(enc: dict, contrato: list[dict]) -> list[dict]:
+def _controles_previos(enc: dict, contrato: list[dict],
+                       mc: dict | None = None) -> list[dict]:
     """Integridad ANTES de comparar. Cruzar dos balances de clientes,
     periodos o monedas distintas produce un número perfectamente formado
     y completamente falso."""
@@ -395,6 +396,34 @@ def _controles_previos(enc: dict, contrato: list[dict]) -> list[dict]:
                 "contradicen_naturaleza": len(contradicen),
                 "no_listadas": fuera["no_listadas"]},
     ))
+
+    # -- movimientos del año anterior: INFORMATIVO, nunca bloquea
+    # MOV_ANTERIOR es opcional. Sin el, la comparacion de movimientos contra
+    # la misma ventana del año anterior no corre, y eso se DECLARA: callarlo
+    # dejaria creer que se comparo y no hubo nada que reportar. No es
+    # evidencia (no contrasta el balance contra nada) y no entra al riesgo
+    # ni a la conclusion.
+    if mc is not None:
+        if mc.get("disponible"):
+            va, vb = mc["ventana_actual"], mc["ventana_anterior"]
+            estado, marca, detalle = "OK", "Δ", (
+                f"Se compararon los movimientos del {va['desde']} al "
+                f"{va['hasta']} contra los del {vb['desde']} al {vb['hasta']}, "
+                f"en {len(mc.get('por_cuenta') or {})} cuentas. La ventana del "
+                "año anterior se recorta a las mismas fechas: lo que el archivo "
+                "traiga fuera de ella no cuenta.")
+        else:
+            estado, marca, detalle = "NO_EJECUTADO", "?", (
+                (mc.get("motivo") or "MOV_ANTERIOR no cargado: la comparación "
+                 "de movimientos contra el año anterior no se ejecutó.")
+                + " Es informativo y no bloquea el papel.")
+        ctrl.append(_control(
+            "P06", marca, "Movimientos contra el año anterior", estado,
+            detalle.strip(), evidencia=False,
+            cifras={"informativo": True,
+                    "ventana_actual": mc.get("ventana_actual"),
+                    "ventana_anterior": mc.get("ventana_anterior")},
+        ))
     return ctrl
 
 
@@ -580,7 +609,7 @@ def _riesgo(gates: list[dict], previos: list[dict], d: dict) -> dict:
     if por_codigo.get("P04", {}).get("estado") == "ALERTA":
         sumar(1, "Hay cuentas fuera del catálogo, con naturaleza heredada", "Control P04")
     if d.get("residuo_supera_umbral"):
-        sumar(3, "Lo no seleccionado supera la materialidad de la fase",
+        sumar(3, "Lo no seleccionado supera la materialidad de desempeño de la fase",
               "Control de alcance")
     if not d.get("aplica"):
         sumar(4, "No hay materialidad aplicada: ninguna cuenta quedó seleccionada",
@@ -628,7 +657,10 @@ def papel_trabajo(encargo_id: str, fase: str | None = None) -> dict:
         }
 
     contrato = _contrato_datos(encargo_id); ping("contrato")
-    previos = _controles_previos(enc, contrato); ping("previos")
+    # Una sola vez: la usan el control P06, la cedula de seleccion del Excel
+    # y la pantalla. Son dos queries agrupadas, no una por cuenta.
+    mc = A.movimientos_comparados(encargo_id); ping("movimientos_comparados")
+    previos = _controles_previos(enc, contrato, mc); ping("previos")
     gates = _gates(encargo_id, d); ping("gates")
     riesgo = _riesgo(gates, previos, d); ping("riesgo")
 
@@ -671,6 +703,7 @@ def papel_trabajo(encargo_id: str, fase: str | None = None) -> dict:
         "gates": gates,
         "cedula_sumaria": cedula,
         "comparativo": d,
+        "movimientos_comparados": mc,
         # El análisis redactado por el modelo, indexado por cuenta, para que
         # la cédula de selección pueda mostrarlo junto a la cifra que explica.
         # Viaja con su procedencia -- modelo, versión, si el auditor lo

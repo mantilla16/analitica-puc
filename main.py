@@ -501,16 +501,39 @@ class EncargoCambio(BaseModel):
     confirmar: bool = False
 
 
+class CifraMaterialidad(BaseModel):
+    """Desempeno o trivial: el auditor digita el % (PCT) o el valor (VALOR).
+    Las dos pueden llegar en null: es "sin definir" y se guarda NULL."""
+    modo: str = "PCT"
+    pct: Decimal | None = None
+    valor: Decimal | None = None
+
+
 class MaterialidadEntrada(BaseModel):
+    """`global` es palabra reservada de Python, de ahi el alias. `valor` se
+    acepta como nombre legado de la global: clientes viejos lo siguen
+    mandando. Si no llega desempeno/trivial, se conserva lo guardado."""
+    model_config = {"populate_by_name": True}
+
+    global_: Decimal | None = Field(default=None, alias="global")
     valor: Decimal | None = None
     porcentaje: Decimal | None = None
     aplicar: bool = False
     nombre: str | None = None
+    desempeno: CifraMaterialidad | None = None
+    trivial: CifraMaterialidad | None = None
+
+    def la_global(self) -> Decimal | None:
+        fijados = self.model_fields_set
+        if "global_" in fijados:
+            return self.global_
+        return self.valor
 
 
 class Parametros(BaseModel):
+    """`pct_trivialidad` ya no se acepta: el trivial es por fase. Si un
+    cliente viejo lo manda, pydantic lo ignora (extra='ignore')."""
     pct_variacion: Decimal = Field(default=Decimal("20"), ge=0)
-    pct_trivialidad: Decimal = Field(default=Decimal("5"), ge=0)
     aplica_variacion: bool = True
     aplica_trivialidad: bool = True
 
@@ -833,10 +856,33 @@ def materialidades(encargo_id: str) -> dict:
 @app.put("/encargos/{encargo_id}/materialidades/{fase}")
 def guardar_materialidad(encargo_id: str, fase: str, m: MaterialidadEntrada,
                          request: Request) -> dict:
-    request.state.bitacora = {"fase": fase, "valor": m.valor,
-                              "porcentaje": m.porcentaje, "aplicar": m.aplicar}
-    fila = db.guardar_materialidad(encargo_id, fase, m.valor, m.porcentaje,
-                                   m.aplicar, m.nombre, _quien(request))
+    actual = db.materialidad_de_fase(encargo_id, fase)
+    if not actual:
+        raise HTTPException(404, f"No existe materialidad de fase {fase}")
+
+    g = m.la_global()
+    # Lo que no llega se conserva: un cliente que solo manda la global no
+    # debe borrar el desempeno que el auditor ya habia fijado.
+    desempeno = (m.desempeno.model_dump() if m.desempeno is not None
+                 else actual["desempeno"])
+    trivial = (m.trivial.model_dump() if m.trivial is not None
+               else actual["trivial"])
+
+    errores = R.validar_materialidad(g, desempeno, trivial)
+    if errores:
+        raise HTTPException(422, " ".join(errores))
+
+    # Se guarda lo RESUELTO (pct y valor) con la global de este momento.
+    res = R.resolver_materialidad({"global": g, "desempeno": desempeno,
+                                   "trivial": trivial, "aplicar": m.aplicar})
+    request.state.bitacora = {"fase": fase, "global": g,
+                              "porcentaje": m.porcentaje, "aplicar": m.aplicar,
+                              "desempeno": res["desempeno"],
+                              "trivial": res["trivial"]}
+    fila = db.guardar_materialidad(
+        encargo_id, fase, global_=res["global"], porcentaje=m.porcentaje,
+        aplicar=m.aplicar, nombre=m.nombre, desempeno=res["desempeno"],
+        trivial=res["trivial"], usuario=_quien(request))
     if not fila:
         raise HTTPException(404, f"No existe materialidad de fase {fase}")
     return fila
@@ -851,7 +897,7 @@ def fijar_fase(encargo_id: str, fase: str) -> dict:
 @app.put("/encargos/{encargo_id}/parametros")
 def guardar_parametros(encargo_id: str, p: Parametros, request: Request) -> dict:
     request.state.bitacora = p.model_dump()
-    db.guardar_parametros(encargo_id, p.pct_variacion, p.pct_trivialidad,
+    db.guardar_parametros(encargo_id, p.pct_variacion,
                           p.aplica_variacion, p.aplica_trivialidad)
     return db.parametros(encargo_id)
 
@@ -1087,8 +1133,14 @@ def ver_balance(encargo_id: str, tipo: str = "BAL_ACTUAL",
 
 @app.get("/encargos/{encargo_id}/variaciones")
 def variaciones(encargo_id: str, fase: str | None = None) -> dict:
-    """Comparativo por cuenta con la materialidad de la fase indicada."""
-    return A.variaciones(encargo_id, fase)
+    """Comparativo por cuenta con la materialidad de la fase indicada, y la
+    comparacion de movimientos contra la misma ventana del año anterior.
+    Esta ultima se pega aqui y no dentro de A.variaciones(): variaciones()
+    la llaman tambien el papel, la evidencia y las observaciones, y no
+    todos la necesitan."""
+    d = A.variaciones(encargo_id, fase)
+    d["movimientos_comparados"] = A.movimientos_comparados(encargo_id)
+    return d
 
 
 @app.get("/encargos/{encargo_id}/cuentas/{codigo}")

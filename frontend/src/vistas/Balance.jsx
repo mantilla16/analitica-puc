@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, monto, entero } from "../api";
 import { Aviso, Punteo } from "../comp/Piezas";
+import CompMov from "../comp/CompMov";
 
 const NIVELES = ["Clase", "Cuenta", "Subcuenta", "Auxiliar"];
 
@@ -258,6 +259,9 @@ function DetalleCuenta({ d, onCerrar }) {
             </div>
           </section>
         )}
+
+        {/* Undefined con un backend viejo: el componente no pinta nada. */}
+        <CompMov datos={d.movimientos_vs_anterior} />
 
         {d.patrones.length > 0 && (
           <section className="mb-8">

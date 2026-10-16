@@ -13,22 +13,211 @@ from typing import Any, Iterable
 
 # --------------------------------------------------------------- materialidad
 
-FACTOR_ME_DEFECTO = Decimal("0.750")
-FACTOR_CTT_DEFECTO = Decimal("0.050")
 PCT_VARIACION_DEFECTO = Decimal("20.00")
 
+# Cada fase tiene TRES cifras: la global (la digita el auditor), la de
+# desempeno (la que define el alcance: contra ella se marca "Monto") y el
+# error trivial (por debajo, una diferencia no se mira). Antes la global se
+# usaba directo como umbral, lo que equivale a una materialidad de desempeno
+# del 100%: ninguna norma la admite, porque no deja margen para errores no
+# detectados que se acumulan por debajo del umbral.
+#
+# Los rangos viven aqui y no como CHECK en la base (regla del proyecto: la
+# base guarda datos, la logica esta en Python). Son los rangos usuales de la
+# practica: desempeno entre 20% y 90% de la global segun el riesgo, trivial
+# entre 2% y 10%.
+RANGO_DESEMPENO = (Decimal("20"), Decimal("90"))
+RANGO_TRIVIAL = (Decimal("2"), Decimal("10"))
+DESEMPENO_PCT_DEFECTO = Decimal("75")
+TRIVIAL_PCT_DEFECTO = Decimal("5")
+MODOS_MATERIALIDAD = ("PCT", "VALOR")
 
-def derivar_materialidad(
-    mp: Decimal,
-    factor_me: Decimal = FACTOR_ME_DEFECTO,
-    factor_ctt: Decimal = FACTOR_CTT_DEFECTO,
-) -> tuple[Decimal, Decimal]:
-    """Materialidad de ejecución y error trivial."""
-    dos = Decimal("0.01")
-    return (
-        (mp * factor_me).quantize(dos),
-        (mp * factor_ctt).quantize(dos),
-    )
+_CENT = Decimal("0.01")
+
+
+def _dec(v: Any) -> Decimal | None:
+    """Cifra opcional a Decimal. str() primero: un float del JSON pasado
+    directo a Decimal arrastra la cola binaria (0.1 -> 0.1000000000000000055)."""
+    if v is None or v == "":
+        return None
+    return Decimal(str(v))
+
+
+def _resolver_cifra(global_: Decimal | None, cifra: dict | None) -> dict:
+    """Una de las dos cifras derivadas (desempeno o trivial), en sus dos
+    formas: el porcentaje sobre la global y el valor en pesos.
+
+    El auditor digita UNA de las dos (segun `modo`) y la otra se deriva, para
+    que el papel muestre siempre ambas: un umbral en pesos sin su % no se
+    puede juzgar contra el rango, y un % sin pesos no dice que se selecciono.
+    """
+    cifra = cifra or {}
+    modo = str(cifra.get("modo") or "PCT").upper()
+    if modo == "VALOR":
+        valor = _dec(cifra.get("valor"))
+        valor = valor.quantize(_CENT) if valor is not None else None
+        # Con global cero o ausente no hay porcentaje: dividir daria error o
+        # un infinito que nadie puede leer.
+        pct = ((valor / global_ * 100).quantize(_CENT)
+               if valor is not None and global_ else None)
+    else:
+        modo = "PCT"
+        # Un pct nulo es "sin definir" (el auditor dejo la casilla vacia), no
+        # el defecto: rellenarlo aqui pondria en el papel un 75% que nadie
+        # aprobo. El defecto solo se siembra al crear el encargo.
+        pct = _dec(cifra.get("pct"))
+        pct = pct.quantize(_CENT) if pct is not None else None
+        valor = ((global_ * pct / 100).quantize(_CENT)
+                 if global_ is not None and pct is not None else None)
+    return {"modo": modo, "pct": pct, "valor": valor}
+
+
+def _cifra_de_fila(fila: dict, prefijo: str) -> dict | None:
+    """Acepta la fila de la base (columnas planas `desempeno_modo`, ...) o un
+    dict ya anidado (`{"desempeno": {"modo", ...}}`), que es como llega del
+    API y como lo arman los casos de validar_motor."""
+    anidado = fila.get(prefijo)
+    if isinstance(anidado, dict):
+        return anidado
+    return {"modo": fila.get(f"{prefijo}_modo"),
+            "pct": fila.get(f"{prefijo}_pct"),
+            "valor": fila.get(f"{prefijo}_valor")}
+
+
+def resolver_materialidad(fila: dict | None) -> dict:
+    """La materialidad de una fase con sus tres cifras resueltas.
+
+    `fila` es una fila de core.materialidad (donde `valor` es la GLOBAL) o un
+    dict con la llave `global`. Devuelve:
+
+        {"global": Decimal|None,
+         "desempeno": {"modo", "pct", "valor"},
+         "trivial":   {"modo", "pct", "valor"},
+         "aplica": bool}
+
+    `aplica` exige las tres condiciones: que el auditor la marque, que haya
+    global y que el desempeno resuelva a pesos. Sin cualquiera de ellas no
+    hay umbral, y sin umbral no se marca nada: no se inventa uno.
+    """
+    fila = fila or {}
+    g = _dec(fila["global"] if "global" in fila else fila.get("valor"))
+    g = g.quantize(_CENT) if g is not None else None
+    desempeno = _resolver_cifra(g, _cifra_de_fila(fila, "desempeno"))
+    trivial = _resolver_cifra(g, _cifra_de_fila(fila, "trivial"))
+    aplica = bool(fila.get("aplicar") and g and desempeno["valor"])
+    return {"global": g, "desempeno": desempeno, "trivial": trivial,
+            "aplica": aplica}
+
+
+_COLUMNAS_PLANAS = tuple(f"{p}_{c}" for p in ("desempeno", "trivial")
+                         for c in ("modo", "pct", "valor"))
+
+
+def materialidad_api(fila: dict | None) -> dict | None:
+    """La fila de core.materialidad en la forma que expone el API: `global`
+    y los dicts `desempeno`/`trivial` resueltos en lugar de las seis
+    columnas planas. Es UNA sola forma para todos los que la leen (endpoint
+    de materialidades, ver encargo, PUT, papel): si cada uno armara la suya,
+    el frontend veria un 75% en una pantalla y un NULL en otra.
+
+    `valor` se conserva como alias de `global` para los lectores viejos.
+    """
+    if fila is None:
+        return None
+    r = resolver_materialidad(fila)
+    salida = {k: v for k, v in fila.items() if k not in _COLUMNAS_PLANAS}
+    salida.update({"global": r["global"], "desempeno": r["desempeno"],
+                   "trivial": r["trivial"], "aplica": r["aplica"]})
+    return salida
+
+
+def _pct_txt(v: Decimal) -> str:
+    return f"{v:.2f}".replace(".", ",") + "%"
+
+
+def validar_materialidad(global_, desempeno: dict | None,
+                         trivial: dict | None) -> list[str]:
+    """Mensajes en espanol de lo que no cumple; lista vacia si todo cumple.
+
+    En modo VALOR el rango se comprueba sobre el porcentaje IMPLICITO cuando
+    hay global: digitar el desempeno en pesos no puede ser la puerta para
+    saltarse el rango que se exige al digitarlo en porcentaje.
+    """
+    errores: list[str] = []
+    try:
+        g = _dec(global_)
+    except (InvalidOperation, ValueError):
+        return ["La materialidad global no es un número válido."]
+    if g is not None and g < 0:
+        errores.append("La materialidad global no puede ser negativa.")
+
+    resueltas = {}
+    for nombre, cifra, rango in (
+            ("de desempeño", desempeno, RANGO_DESEMPENO),
+            ("trivial", trivial, RANGO_TRIVIAL)):
+        cifra = cifra or {}
+        modo = str(cifra.get("modo") or "PCT").upper()
+        if modo not in MODOS_MATERIALIDAD:
+            errores.append(f"El modo de la materialidad {nombre} debe ser "
+                           f"PCT o VALOR (llegó «{cifra.get('modo')}»).")
+            continue
+        try:
+            r = _resolver_cifra(g if (g is None or g >= 0) else None, cifra)
+        except (InvalidOperation, ValueError):
+            errores.append(f"La materialidad {nombre} no es un número válido.")
+            continue
+        lo, hi = rango
+        # Sin cifra es "sin definir": se guarda NULL y el rango no aplica.
+        # La consecuencia (sin desempeno no hay umbral) la resuelve
+        # resolver_materialidad, no un 422 que impida guardar un borrador.
+        if modo == "VALOR":
+            if r["valor"] is None:
+                continue
+            if r["valor"] < 0:
+                errores.append(f"La materialidad {nombre} no puede ser negativa.")
+                continue
+            if r["pct"] is not None and not (lo <= r["pct"] <= hi):
+                errores.append(
+                    f"La materialidad {nombre} debe estar entre el {lo}% y el "
+                    f"{hi}% de la global; el valor digitado equivale al "
+                    f"{_pct_txt(r['pct'])}.")
+        else:
+            if r["pct"] is None:
+                continue
+            if r["pct"] < 0:
+                errores.append(f"La materialidad {nombre} no puede ser negativa.")
+                continue
+            if not (lo <= r["pct"] <= hi):
+                errores.append(
+                    f"La materialidad {nombre} debe estar entre el {lo}% y el "
+                    f"{hi}% de la global (llegó {_pct_txt(r['pct'])}).")
+        resueltas[nombre] = r
+
+    # El trivial es el piso por debajo del cual nada se mira; si supera al
+    # desempeno, hay cuentas que superan el umbral de seleccion y a la vez
+    # se descartan por triviales. Es una contradiccion, no una opcion.
+    d, t = resueltas.get("de desempeño"), resueltas.get("trivial")
+    if d and t and d["valor"] is not None and t["valor"] is not None \
+            and t["valor"] > d["valor"]:
+        errores.append("El error trivial no puede superar la materialidad de "
+                       "desempeño.")
+    return errores
+
+
+def umbrales_seleccion(mat: dict, aplica_trivialidad: bool = True
+                       ) -> tuple[Decimal | None, Decimal]:
+    """(umbral de Monto, piso trivial) a partir de la materialidad resuelta.
+
+    El umbral es la de DESEMPENO, no la global. Con el trivial apagado vale
+    0, asi las comparaciones `>= trivial` dejan de filtrar. Sin materialidad
+    aplicada no hay umbral (None) y el trivial es 0, como antes.
+    """
+    if not mat or not mat.get("aplica"):
+        return None, Decimal(0)
+    umbral = mat["desempeno"]["valor"]
+    tv = mat["trivial"]["valor"]
+    trivial = tv if (aplica_trivialidad and tv is not None) else Decimal(0)
+    return umbral, trivial
 
 
 # -------------------------------------------------------------------- fechas
@@ -89,6 +278,47 @@ def desalineados(insumos, fechas: dict) -> list[dict]:
 def inicio_periodo_auditado(fecha_corte: date) -> date:
     """Todo movimiento anterior a esta fecha está en periodo ya cerrado."""
     return date(fecha_corte.year, 1, 1)
+
+
+def ventanas_movimientos(fecha_corte: date, fecha_corte_anterior: date
+                         ) -> tuple[tuple[date, date], tuple[date, date]]:
+    """Las dos ventanas de la comparacion de movimientos.
+
+    La anterior es la MISMA ventana calendario un ano atras (1-ene al mismo
+    corte), no el ano completo: comparar seis meses contra doce mediria la
+    duracion del periodo, no el comportamiento de la cuenta. Por eso el
+    archivo del ano anterior puede traer todo el ejercicio y aqui se recorta.
+    """
+    return ((inicio_periodo_auditado(fecha_corte), fecha_corte),
+            (inicio_periodo_auditado(fecha_corte_anterior), fecha_corte_anterior))
+
+
+def comparar_movimientos(actual: dict[str, dict], anterior: dict[str, dict]
+                         ) -> dict[str, dict]:
+    """Por cuenta: movimientos del periodo contra los de la misma ventana del
+    ano anterior. Entra la UNION de cuentas: una cuenta que no se movio en
+    uno de los dos lados es justo lo que hay que ver, y aparece con ceros.
+
+    `delta_neto_pct` es None con neto anterior cero: no hay base, y un
+    porcentaje infinito no se lee.
+    """
+    cero = {"n": 0, "debito": Decimal(0), "credito": Decimal(0),
+            "neto": Decimal(0)}
+    salida = {}
+    for cta in sorted(set(actual) | set(anterior)):
+        a = actual.get(cta) or cero
+        b = anterior.get(cta) or cero
+        d_neto = (a["neto"] - b["neto"]).quantize(_CENT)
+        salida[cta] = {
+            "actual": dict(a), "anterior": dict(b),
+            "delta_n": a["n"] - b["n"],
+            "delta_neto": d_neto,
+            "delta_neto_pct": (float((d_neto / abs(b["neto"]) * 100).quantize(_CENT))
+                               if b["neto"] else None),
+            "delta_debito": (a["debito"] - b["debito"]).quantize(_CENT),
+            "delta_credito": (a["credito"] - b["credito"]).quantize(_CENT),
+        }
+    return salida
 
 
 # ---------------------------------------------------------------- naturaleza

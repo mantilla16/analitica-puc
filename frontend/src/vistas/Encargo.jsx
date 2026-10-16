@@ -60,6 +60,9 @@ export default function Encargo({ encargoId, onVolver }) {
   if (!enc) return <p className="p-12 text-sm text-tinta-suave">Cargando…</p>;
 
   const mats = enc.materialidades ?? [];
+  // `valor` es el nombre anterior de la global: se conserva como respaldo
+  // para no romper con un backend que aún no manda `global`.
+  const globalDe = (m) => m?.global ?? m?.valor;
   const activa = mats.find((m) => m.fase === enc.fase_activa);
 
   async function subir(tipo, archivo) {
@@ -114,9 +117,15 @@ export default function Encargo({ encargoId, onVolver }) {
           <Dato etiqueta="Clases 4 · 5 · 6 · 7 contra">
             <span className="cifra">{fecha(enc.fecha_corte_anterior)}</span>
           </Dato>
-          <Dato etiqueta={activa ? activa.nombre : "Materialidad"}>
-            {activa?.aplicar && activa?.valor ? (
-              <span className="cifra">{monto(activa.valor)}</span>
+          <Dato etiqueta={activa ? `${activa.nombre} · global · desempeño · trivial` : "Materialidad"}>
+            {activa?.aplicar && globalDe(activa) ? (
+              <span className="cifra text-sm">
+                {monto(globalDe(activa))}
+                <span className="text-tinta-suave"> · </span>
+                {monto(activa.desempeno?.valor)}
+                <span className="text-tinta-suave"> · </span>
+                {monto(activa.trivial?.valor)}
+              </span>
             ) : (
               <button onClick={() => setPestana("materialidad")}
                       className="text-sm text-ambar underline underline-offset-4">
@@ -130,8 +139,8 @@ export default function Encargo({ encargoId, onVolver }) {
           {mats.map((m) => (
             <span key={m.fase} className={m.fase === enc.fase_activa ? "text-tinta-media" : ""}>
               {m.fase_nombre}:{" "}
-              <span className="cifra">{m.valor ? monto(m.valor) : "—"}</span>
-              {!m.aplicar && m.valor ? " (sin aplicar)" : ""}
+              <span className="cifra">{globalDe(m) ? monto(globalDe(m)) : "—"}</span>
+              {!m.aplicar && globalDe(m) ? " (sin aplicar)" : ""}
             </span>
           ))}
         </p>

@@ -281,6 +281,163 @@ def validar_motivos() -> None:
 
 
 # =====================================================================
+# MATERIALIDAD: TRES CIFRAS
+# =====================================================================
+
+def validar_materialidad() -> None:
+    """El umbral de seleccion es la de DESEMPENO, no la global, y el trivial
+    es por fase. Se siembran cuentas justo en la franja que el cambio mueve:
+    entre el desempeno y la global."""
+    G = D("1000000")
+    pct = R.resolver_materialidad({
+        "global": G, "aplicar": True,
+        "desempeno": {"modo": "PCT", "pct": 75},
+        "trivial": {"modo": "PCT", "pct": 5}})
+    umbral, trivial = R.umbrales_seleccion(pct)
+    caso("materialidad · el umbral es el desempeño (75% de la global)",
+         D("750000.00"), umbral)
+    caso("materialidad · el trivial sale de la fase", D("50000.00"), trivial)
+
+    def motivo(sa, sc, u, t):
+        sa, sc = D(sa), D(sc)
+        var = (sa - sc).quantize(CENT)
+        pctv = ((sa - sc) / abs(sc) * 100).quantize(CENT) if sc else None
+        return R.motivo_seleccion(sa, sc, var, pctv, u, t, D("20"), True)
+
+    # Variacion del 80% de la global, sobre una base grande para que el
+    # porcentaje (8%) no la marque por Comportamiento: lo unico que la puede
+    # marcar es el monto. Con la global como umbral (comportamiento previo)
+    # quedaba FUERA; con el desempeno entra.
+    caso("materialidad · variación entre 75% y 100% de la global entra por Monto",
+         "Monto", motivo("10800000", "10000000", umbral, trivial))
+    caso("materialidad · esa misma variación NO entraba con la global de umbral",
+         None, motivo("10800000", "10000000", G, trivial))
+    caso("materialidad · bajo el desempeño no entra por Monto",
+         None, motivo("10700000", "10000000", umbral, trivial))
+
+    # Trivial en VALOR igual al 5%: debe filtrar exactamente lo mismo.
+    val = R.resolver_materialidad({
+        "global": G, "aplicar": True,
+        "desempeno": {"modo": "PCT", "pct": 75},
+        "trivial": {"modo": "VALOR", "valor": "50000"}})
+    caso("materialidad · trivial en VALOR deriva su % implícito",
+         D("5.00"), val["trivial"]["pct"])
+    u2, t2 = R.umbrales_seleccion(val)
+    cuentas = [("49999", "0"), ("50000", "0"), ("0", "50001"), ("0", "49000"),
+               ("600", "500"), ("60000", "50000"), ("-50000", "-1"),
+               ("-49999", "-1")]
+    caso("materialidad · trivial en VALOR filtra igual que el % equivalente",
+         [motivo(a, b, umbral, trivial) for a, b in cuentas],
+         [motivo(a, b, u2, t2) for a, b in cuentas])
+
+    # Sin desempeno definido no hay umbral: no se inventa un 75%.
+    sin = R.resolver_materialidad({"global": G, "aplicar": True,
+                                   "desempeno": {"modo": "PCT", "pct": None}})
+    caso("materialidad · sin desempeño definido no aplica", False, sin["aplica"])
+
+    # Rangos.
+    def errs(des, triv=None, g=G):
+        return R.validar_materialidad(g, des, triv or {"modo": "PCT", "pct": 5})
+    for p_ in ("19", "91"):
+        caso(f"materialidad · rechaza desempeño del {p_}%",
+             True, bool(errs({"modo": "PCT", "pct": p_})))
+    for p_ in ("1", "11"):
+        caso(f"materialidad · rechaza trivial del {p_}%",
+             True, bool(errs({"modo": "PCT", "pct": 75},
+                             {"modo": "PCT", "pct": p_})))
+    for d_, t_ in (("20", "2"), ("90", "10"), ("20", "10"), ("90", "2")):
+        caso(f"materialidad · acepta los bordes desempeño {d_}% / trivial {t_}%",
+             [], errs({"modo": "PCT", "pct": d_}, {"modo": "PCT", "pct": t_}))
+    caso("materialidad · en VALOR valida el % implícito (19%)",
+         True, bool(errs({"modo": "VALOR", "valor": "190000"})))
+    caso("materialidad · en VALOR acepta el borde implícito (20%)",
+         [], errs({"modo": "VALOR", "valor": "200000"}))
+    caso("materialidad · rechaza valores negativos",
+         True, bool(errs({"modo": "VALOR", "valor": "-1"})))
+    caso("materialidad · cifras en null son 'sin definir', no error",
+         [], errs({"modo": "PCT", "pct": None}, {"modo": "VALOR", "valor": None}))
+
+
+# =====================================================================
+# MOVIMIENTOS CONTRA EL AÑO ANTERIOR
+# =====================================================================
+
+def validar_movimientos_comparados() -> None:
+    """Sin MOV_ANTERIOR no se compara contra ceros; con dos cargas, los
+    deltas salen exactos y lo que cae fuera de la ventana no cuenta."""
+    import analisis as A
+    from datetime import date
+
+    corte, corte_ant = date(2026, 6, 30), date(2025, 6, 30)
+    r = A._comparar_cargas("x", None, corte, corte_ant)
+    caso("movimientos · sin MOV_ANTERIOR no está disponible",
+         (False, {}), (r["disponible"], r["por_cuenta"]))
+    caso("movimientos · sin MOV_ANTERIOR dice por qué", True, bool(r["motivo"]))
+    caso("movimientos · la ventana anterior es la misma un año atrás",
+         {"desde": "2025-01-01", "hasta": "2025-06-30"}, r["ventana_anterior"])
+
+    # Dos cargas sinteticas dentro de una transaccion que se deshace: la
+    # base queda como estaba, y la SQL que se prueba es la real.
+    with db.conn() as c:
+        try:
+            cli = c.execute("SELECT id FROM core.cliente LIMIT 1").fetchone()
+            if not cli:
+                resultados.append((False, "movimientos · cargas sintéticas",
+                                   "no hay un cliente para colgar las cargas"))
+                return
+
+            def carga(tipo):
+                return c.execute(
+                    """INSERT INTO core.carga (cliente_id, tipo, archivo, hash_sha256)
+                       VALUES (%s, %s, 'validar_motor', 'sintetico') RETURNING id""",
+                    (cli["id"], tipo)).fetchone()["id"]
+
+            act, ant = carga("MOV_ACTUAL"), carga("MOV_ANTERIOR")
+            filas = [
+                (act, "2026-02-10", "110505", "100", "0"),
+                (act, "2026-05-01", "110510", "0", "30"),
+                (act, "2026-03-01", "413505", "0", "500"),
+                (act, "2026-07-15", "110505", "999", "0"),   # despues del corte
+                (ant, "2025-03-01", "110505", "50", "0"),
+                (ant, "2025-11-20", "110505", "1000", "0"),  # fuera de la ventana
+                (ant, "2025-04-01", "510506", "200", "0"),
+            ]
+            for i, (cid, fecha, cod, deb, cre) in enumerate(filas, start=2):
+                c.execute(
+                    """INSERT INTO raw.movimiento_staging
+                         (carga_id, fila_origen, fecha, num_doc, codigo_puc,
+                          debito, credito)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                    (cid, i, fecha, f"D{i}", cod, deb, cre))
+
+            r = A._comparar_cargas(act, ant, corte, corte_ant, c=c)
+            pc = r["por_cuenta"]
+            caso("movimientos · con las dos cargas está disponible",
+                 True, r["disponible"])
+            caso("movimientos · cuentas = unión de los dos lados",
+                 ["1105", "4135", "5105"], sorted(pc))
+            caso("movimientos · lo de fuera de la ventana no cuenta (1105)",
+                 (2, 1, D("70"), D("50")),
+                 (pc["1105"]["actual"]["n"], pc["1105"]["anterior"]["n"],
+                  pc["1105"]["actual"]["neto"], pc["1105"]["anterior"]["neto"]))
+            caso("movimientos · deltas de 1105",
+                 (1, D("20.00"), 40.0),
+                 (pc["1105"]["delta_n"], pc["1105"]["delta_neto"],
+                  pc["1105"]["delta_neto_pct"]))
+            caso("movimientos · cuenta sin año anterior: % en None",
+                 (D("-500.00"), None),
+                 (pc["4135"]["delta_neto"], pc["4135"]["delta_neto_pct"]))
+            caso("movimientos · cuenta que no se movió este año: ceros y -100%",
+                 (0, D("-200.00"), -100.0),
+                 (pc["5105"]["actual"]["n"], pc["5105"]["delta_neto"],
+                  pc["5105"]["delta_neto_pct"]))
+        finally:
+            # El pool confirma al salir del bloque si la transaccion sigue
+            # abierta: se deshace a mano para no dejar las cargas sembradas.
+            c.rollback()
+
+
+# =====================================================================
 # CUADRE DEL ASIENTO
 # =====================================================================
 
@@ -408,6 +565,8 @@ def main() -> int:
     validar_huellas(base)
     validar_cotejo(base)
     validar_motivos()
+    validar_materialidad()
+    validar_movimientos_comparados()
     validar_direccion()
     validar_duplicados(base)
     validar_documentos()

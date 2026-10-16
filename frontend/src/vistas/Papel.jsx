@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, monto, entero, fecha } from "../api";
 import { Aviso, Boton, Chip, Punteo } from "../comp/Piezas";
+import { pctTexto } from "../comp/CompMov";
 
 const TONO_ESTADO = {
   OK: "verde", ALERTA: "ambar", FALLA: "rojo",
@@ -245,6 +246,13 @@ export default function Papel({ encargoId, fase }) {
 
   const id = p.identificacion;
   const d = p.comparativo;
+  const mat = id.materialidad;
+  const mov = p.movimientos_comparados;
+  const hayMov = mov?.disponible === true;
+  // Si el servidor ya dejó constancia de la comparación en el contrato o en
+  // los controles previos, no se repite la nota desde acá.
+  const yaAvisada = [...(p.contrato_datos ?? []), ...(p.controles_previos ?? [])]
+    .some((x) => x.tipo === "MOV_ANTERIOR" || x.codigo === "MOV_ANTERIOR");
   const evidencia = p.gates.filter((g) => g.es_evidencia);
   const internos = p.gates.filter((g) => !g.es_evidencia);
 
@@ -368,6 +376,12 @@ export default function Papel({ encargoId, fase }) {
             </div>
           ))}
         </div>
+        {!hayMov && !yaAvisada && mov !== undefined && (
+          <p className="mt-3 text-xs text-tinta-suave">
+            Movimientos del año anterior: no cargados; la comparación de
+            movimientos no se ejecutó.
+          </p>
+        )}
       </Seccion>
 
       {/* ------------------------------------------- controles previos */}
@@ -430,9 +444,39 @@ export default function Papel({ encargoId, fase }) {
       <Seccion n="5" titulo="Alcance y selección"
                nota="La materialidad y los criterios que definieron qué cuentas
                      entran a revisión.">
-        <div className="grid gap-3 sm:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-3">
           {[
-            ["Materialidad de la fase", d.umbral ? monto(d.umbral) : "sin aplicar"],
+            ["Materialidad global", mat?.global ? monto(mat.global) : "sin aplicar"],
+            ["Desempeño (umbral de monto)", mat?.desempeno?.valor ?? d.umbral ? monto(mat?.desempeno?.valor ?? d.umbral) : "sin aplicar"],
+            ["Trivial", mat?.trivial?.valor ? monto(mat.trivial.valor) : "sin definir"],
+          ].map(([r, v]) => (
+            <div key={r} className="panel p-4">
+              <p className="rotulo">{r}</p>
+              <p className="cifra mt-1 text-lg">{v}</p>
+            </div>
+          ))}
+        </div>
+        <p className="mt-2 text-xs text-tinta-media">
+          {["desempeno", "trivial"].map((k) => {
+            const c = mat?.[k];
+            if (!c) return null;
+            return (
+              <span key={k} className="mr-4">
+                {k === "desempeno" ? "Desempeño" : "Trivial"}{" "}
+                <span className="cifra">{monto(c.valor)}</span>
+                {c.pct != null && (
+                  <span className="text-tinta-suave">
+                    {" "}({pctTexto(c.pct)} de la global
+                    {c.modo === "VALOR" ? ", fijado en pesos" : ""})
+                  </span>
+                )}
+              </span>
+            );
+          })}
+        </p>
+
+        <div className="mt-3 grid gap-3 sm:grid-cols-3">
+          {[
             ["Cuentas comparadas", entero(d.total_cuentas)],
             ["Seleccionadas", entero(d.significativas)],
             ["No seleccionadas (suma)", monto(d.residuo_no_seleccionado)],
@@ -450,7 +494,7 @@ export default function Papel({ encargoId, fase }) {
             ? `, variación porcentual desde ${String(d.pct_variacion)}%`
             : ", variación porcentual desactivada"}
           {d.aplica_trivialidad !== false
-            ? `, error trivial del ${String(d.pct_trivialidad)}% de la materialidad`
+            ? ", error trivial según la materialidad trivial de la fase"
             : ", sin error trivial"}
           , más los criterios estructurales de cuenta nueva, cuenta cerrada y
           naturaleza invertida.
@@ -478,6 +522,7 @@ export default function Papel({ encargoId, fase }) {
                 <th className="px-3 py-2 text-right font-normal">Variación</th>
                 <th className="px-3 py-2 text-right font-normal">%</th>
                 <th className="px-3 py-2 font-normal">Motivo</th>
+                {hayMov && <th className="px-3 py-2 text-right font-normal" title="Cambio del neto de movimientos contra la misma ventana del año anterior">Mov. neto Δ</th>}
                 <th className="px-3 py-2 text-center font-normal">Marca</th>
               </tr>
             </thead>
@@ -498,9 +543,21 @@ export default function Papel({ encargoId, fase }) {
                     {f.variacion_pct === null ? "—" : `${f.variacion_pct}%`}
                   </td>
                   <td className="px-3 py-2 text-xs">{f.motivo}</td>
+                  {hayMov && (() => {
+                    const c = mov.por_cuenta?.[f.cuenta];
+                    return (
+                      <td className="cifra whitespace-nowrap px-3 py-2 text-right text-xs"
+                          title={c ? `Actual ${monto(c.actual?.neto ?? 0)} · año anterior ${monto(c.anterior?.neto ?? 0)}` : ""}>
+                        {c ? monto(c.delta_neto) : "—"}
+                        {c?.delta_neto_pct != null && (
+                          <span className="ml-1 text-tinta-suave">({pctTexto(c.delta_neto_pct)})</span>
+                        )}
+                      </td>
+                    );
+                  })()}
                   <td className="cifra px-3 py-2 text-center">Δ</td>
                 </tr>,
-                <Analisis key={`${f.cuenta}-ia`} o={p.observaciones?.[f.cuenta]} />,
+                <Analisis key={`${f.cuenta}-ia`} o={p.observaciones?.[f.cuenta]} columnas={hayMov ? 9 : 8} />,
               ])}
             </tbody>
           </table>
@@ -658,12 +715,12 @@ export default function Papel({ encargoId, fase }) {
    es papel de trabajo: es una opinión de origen desconocido dentro de un
    documento firmado.
 */
-function Analisis({ o }) {
+function Analisis({ o, columnas = 8 }) {
   if (!o?.texto) return null;
   const sinVerificar = o.cifras_no_verificadas ?? [];
   return (
     <tr className="border-b border-regla">
-      <td colSpan={8} className="px-3 pb-3">
+      <td colSpan={columnas} className="px-3 pb-3">
         <div className="rounded-[8px] border-l-2 border-cian bg-papel-hondo/60 px-3 py-2">
           <p className="flex flex-wrap items-center gap-2">
             <span className="rotulo">Análisis</span>
