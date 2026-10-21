@@ -320,6 +320,15 @@ export default function Encargo({ encargoId, onVolver }) {
       {/* ------------------------------------------------------- mapeo */}
       {carga?.requiere_mapeo && !resultado && (
         <section className="mt-10 panel p-6">
+          {/* Cuando el mapeo guardado no le sirve al archivo, se dice por qué
+              en vez de pedir el mapeo como si fuera la primera vez. */}
+          {carga.motivo_mapeo && (
+            <div className="mb-5">
+              <Aviso tono="alerta" titulo="El mapeo guardado no sirve para este archivo">
+                {carga.motivo_mapeo}
+              </Aviso>
+            </div>
+          )}
           <Mapeo
             cargaId={carga.carga_id}
             onListo={() => { setCarga({ ...carga, requiere_mapeo: false }); procesar(carga.carga_id); }}

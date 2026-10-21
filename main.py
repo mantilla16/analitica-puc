@@ -930,7 +930,16 @@ async def subir(
         if not destino.exists():
             shutil.move(str(temporal), destino)
 
+        est = X.inspeccionar(destino, set(db.sinonimos(ins["naturaleza"])))
+
+        # El mapeo guardado solo se reutiliza si le sirve a ESTE archivo.
+        # Antes se adjuntaba a ciegas y, si el archivo nombraba distinto sus
+        # hojas, el procesado reventaba sin ofrecer la pantalla de mapeo.
         perfil = db.perfil_vigente(enc["cliente_id"], tipo)
+        motivo_mapeo = S.perfil_no_sirve(est, perfil["mapeo"]) if perfil else None
+        if motivo_mapeo:
+            perfil = None
+
         c = db.crear_carga(enc["cliente_id"], encargo_id, tipo, str(destino),
                            hash_, periodo_ini, periodo_fin,
                            perfil["id"] if perfil else None, _quien(request))
@@ -940,12 +949,13 @@ async def subir(
             "tipo": tipo, "archivo": archivo.filename, "hash": hash_,
             "periodo": f"{periodo_ini} a {periodo_fin}",
             "requiere_mapeo": perfil is None,
+            "motivo_mapeo": motivo_mapeo,
         }
-        est = X.inspeccionar(destino, set(db.sinonimos(ins["naturaleza"])))
         return {
             "carga_id": c["id"], "tipo": tipo,
             "naturaleza": ins["naturaleza"], "hash": hash_,
             "requiere_mapeo": perfil is None,
+            "motivo_mapeo": motivo_mapeo,
             "perfil_id": perfil["id"] if perfil else None,
             "hojas": [
                 {k: h[k] for k in ("hoja", "fila_encabezado", "encabezados",
@@ -1029,7 +1039,21 @@ def procesar(carga_id: str, request: Request, tareas: BackgroundTasks,
         raise HTTPException(409, "La carga no tiene perfil de mapeo confirmado")
 
     if sincrono:                        # útil para balances (820 filas)
-        r = S.procesar(carga_id)
+        # Un archivo que no se deja leer es un problema del dato, no del
+        # servidor: se marca la carga, queda el hallazgo y la pantalla recibe
+        # el motivo. Antes salia un 500 mudo y la carga quedaba en CARGADA
+        # sin que nadie supiera por que.
+        try:
+            r = S.procesar(carga_id)
+        except Exception as exc:
+            db.actualizar_carga(carga_id, estado="RECHAZADA")
+            db.crear_hallazgo(
+                encargo_id=c["encargo_id"], carga_id=carga_id,
+                tipo="ERROR_PROCESO", severidad="BLOQUEANTE",
+                descripcion=f"Fallo al procesar: {exc}",
+            )
+            raise HTTPException(
+                422, f"No se pudo procesar el archivo: {exc}") from exc
         request.state.bitacora = {
             "tipo": c["tipo"], "resultado": r.get("resultado"),
             "filas_staging": r.get("filas_staging"),

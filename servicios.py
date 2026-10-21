@@ -88,6 +88,39 @@ def _hojas_incompatibles(c: dict, mapeo: dict) -> list[dict]:
     return problemas
 
 
+def perfil_no_sirve(est: dict, mapeo: dict) -> str | None:
+    """Por que el mapeo guardado NO le sirve a este archivo, o None si sirve.
+
+    El perfil se reutiliza en silencio en cada carga del mismo cliente. Si
+    el archivo nuevo nombra distinto sus hojas ('ENE_JUN 2026' contra
+    'Jun 2026') o movio columnas, usarlo a ciegas reventaba el procesado
+    con un 500 y la pantalla quedaba colgada, sin ofrecer el mapeo.
+
+    No se intenta adivinar la hoja equivalente: 'Jun 2025' y 'Jun 2026'
+    traen las mismas columnas, y elegir la que no es haria comparar otro
+    periodo sin que nadie lo note. Se devuelve el motivo y se pide mapeo.
+    """
+    por_nombre = {h["hoja"]: h for h in est.get("hojas", [])}
+    columnas = {k: v for k, v in (mapeo.get("columnas") or {}).items() if v}
+    hojas = X.hojas_del_perfil(mapeo)
+    if not hojas:
+        return None                     # perfil viejo sin hoja: lee todas
+    faltan = [h for h in hojas if h not in por_nombre]
+    if faltan:
+        return ("El mapeo guardado lee la(s) hoja(s) "
+                + ", ".join(repr(h) for h in faltan)
+                + ", que este archivo no tiene (trae "
+                + ", ".join(repr(h) for h in por_nombre)
+                + "). Indique cuál hoja corresponde a este insumo.")
+    for nombre in hojas:
+        try:
+            X._indices(columnas, por_nombre[nombre].get("columnas") or [])
+        except ValueError as e:
+            return (f"La hoja {nombre!r} no tiene las columnas del mapeo "
+                    f"guardado ({e}). Revise el mapeo.")
+    return None
+
+
 def sugerir_mapeo(naturaleza: str, encabezados: list[str]) -> list[dict]:
     sin = db.sinonimos(naturaleza)
     campos = {c["campo"]: c for c in db.campos_estandar(naturaleza)}
