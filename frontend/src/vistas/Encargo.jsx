@@ -371,9 +371,22 @@ export default function Encargo({ encargoId, onVolver }) {
           {resultado.promocion && (
             <>
               <div className="flex gap-8 border-y border-regla py-4">
-                <Dato etiqueta="Filas cargadas">
-                  <span className="cifra">{entero(resultado.promocion.promovidas)}</span>
+                <Dato etiqueta="Filas del archivo">
+                  <span className="cifra">
+                    {entero(resultado.promocion.del_archivo ?? resultado.promocion.promovidas)}
+                  </span>
                 </Dato>
+                {resultado.promocion.sintetizadas > 0 && (
+                  <Dato etiqueta="Derivadas por el sistema">
+                    <span className="cifra"
+                          title="Clases, cuentas y subcuentas que el archivo no trae (SAP solo exporta las hojas del árbol). El sistema las arma sumando las cuentas del archivo por su código; no agregan saldo nuevo.">
+                      {entero(resultado.promocion.sintetizadas)}
+                    </span>
+                    <span className="ml-2 text-xs text-tinta-suave">
+                      sumas de las anteriores
+                    </span>
+                  </Dato>
+                )}
                 <Dato etiqueta="Descartadas">
                   <span className="cifra">{entero(resultado.promocion.descartadas)}</span>
                   <span className="ml-2 text-xs text-tinta-suave">

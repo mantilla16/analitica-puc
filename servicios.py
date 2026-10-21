@@ -726,7 +726,12 @@ def promover_balance(carga_id: str) -> dict:
                 descripcion=f"El nivel {q['nivel']} no suma cero ({q['filas']} filas)",
             )
 
+    # `promovidas` cuenta tambien los padres derivados, y en un balance de
+    # SAP eso casi duplica la cifra: el auditor ve 786 contra las 463 filas
+    # de su Excel y cree que se colaron registros. Se separa siempre.
     return {"promovidas": n, "descartadas": descartadas,
+            "del_archivo": n - len(sintetizadas),
+            "sintetizadas": len(sintetizadas),
             "excluidas_contenidas": contenido["contenidas"],
             "excluidas_padres": contenido["padres"],
             "fuera_por_digitos": fuera_por_digitos,
