@@ -104,20 +104,36 @@ else
         done
         verde "  (primera vez: 01-15 sembradas como aplicadas)"
     fi
-    for f in $(ls [0-9][0-9]_*.sql 2>/dev/null | sort); do
+    # .sql y .py van en UN solo orden numerico: un script de datos (p.ej.
+    # rearmar balances) suele depender de la migracion de esquema anterior.
+    for f in $(ls [0-9][0-9]_*.sql [0-9][0-9]_*.py 2>/dev/null | sort); do
         ya=$(psql_aqui -tAc "SELECT 1 FROM core.migracion WHERE archivo='$f'")
         if [ "$ya" = "1" ]; then
             continue
         fi
-        printf '  %s ... ' "$f"
-        if psql_aqui -f "$f" >/dev/null 2>&1; then
-            psql_aqui -c "INSERT INTO core.migracion(archivo) VALUES('$f')" >/dev/null
-            verde "aplicada"
-        else
-            rojo "FALLO"
-            rojo "  revisa: PGCLIENTENCODING=UTF8 psql \"\$AUDITORIA_DSN\" -v ON_ERROR_STOP=1 -f $f"
-            exit 1
-        fi
+        case "$f" in
+        *.sql)
+            printf '  %s ... ' "$f"
+            if psql_aqui -f "$f" >/dev/null 2>&1; then
+                psql_aqui -c "INSERT INTO core.migracion(archivo) VALUES('$f')" >/dev/null
+                verde "aplicada"
+            else
+                rojo "FALLO"
+                rojo "  revisa: PGCLIENTENCODING=UTF8 psql \"\$AUDITORIA_DSN\" -v ON_ERROR_STOP=1 -f $f"
+                exit 1
+            fi ;;
+        *.py)
+            # Scripts de datos de una sola vez. Si fallan NO se marcan como
+            # aplicados (se reintentan en el proximo deploy) pero tampoco
+            # frenan el despliegue: el codigo nuevo ya es valido sin ellos.
+            echo "  $f:"
+            if AUDITORIA_DSN="$DSN" .venv/bin/python "$f"; then
+                psql_aqui -c "INSERT INTO core.migracion(archivo) VALUES('$f')" >/dev/null
+                verde "  $f aplicado"
+            else
+                rojo "  $f FALLO; se reintenta en el proximo despliegue"
+            fi ;;
+        esac
     done
 fi
 

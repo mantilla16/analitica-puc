@@ -39,6 +39,34 @@ def compara_contra_cierre(clase: str) -> bool:
     """True si la cuenta se compara contra el cierre del año anterior."""
     return (clase or "")[:1] in CLASES_CONTRA_CIERRE
 
+
+# ------------------------------------------------- exclusiones del auditor
+
+MOTIVO_EXCLUSION_MIN = 10
+
+
+def validar_exclusion(prefijo: str, motivo: str) -> list[str]:
+    """Una exclusion es juicio profesional y tiene que poder sostenerse en
+    el papel: sin motivo no hay exclusion. El prefijo va de 1 a 4 digitos
+    porque el analisis trabaja a nivel cuenta (4): '9' saca la clase,
+    '2408' saca la cuenta; un auxiliar no se puede sacar a medias."""
+    errores = []
+    p = (prefijo or "").strip()
+    if not (p.isdigit() and 1 <= len(p) <= 4 and p[0] in CLASES_PUC):
+        errores.append("El código debe ser una clase, grupo o cuenta del PUC "
+                       "(1 a 4 dígitos, empezando por 1-9).")
+    if len((motivo or "").strip()) < MOTIVO_EXCLUSION_MIN:
+        errores.append(f"El motivo es obligatorio (mínimo {MOTIVO_EXCLUSION_MIN} "
+                       "caracteres): queda en el papel de trabajo.")
+    return errores
+
+
+def exclusion_de(cuenta: str, exclusiones: list[dict]) -> dict | None:
+    """La exclusion que aplica a una cuenta: la del prefijo mas largo, para
+    que '2408' con su motivo propio gane sobre '2' con uno general."""
+    candidatas = [e for e in exclusiones if cuenta.startswith(e["prefijo"])]
+    return max(candidatas, key=lambda e: len(e["prefijo"]), default=None)
+
 # Cada fase tiene TRES cifras: la global (la digita el auditor), la de
 # desempeno (la que define el alcance: contra ella se marca "Monto") y el
 # error trivial (por debajo, una diferencia no se mira). Antes la global se

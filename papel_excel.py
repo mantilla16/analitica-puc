@@ -474,6 +474,24 @@ def construir(p: dict) -> bytes:
            [[k, v] for k, v in (d.get("por_motivo") or {}).items()],
            anchos=[32, 12])
 
+    # Exclusiones del auditor: aparte y con su motivo. Si no se listaran, el
+    # papel archivado no diria que esas cuentas se sacaron a proposito.
+    ex = d.get("excluidas") or []
+    if ex:
+        fila += len(d.get("por_motivo") or {}) + 3
+        h.cell(row=fila, column=1,
+               value="Cuentas excluidas del análisis por decisión del auditor"
+               ).font = _rotulo
+        _tabla(h, fila + 1,
+               ["Cuenta", "Nombre", "Variación", "Excluida por (prefijo)",
+                "Motivo", "Quién", "Cuándo"],
+               [[f["cuenta"], f["nombre"], _num(f["variacion"]),
+                 f["exclusion"]["prefijo"], f["exclusion"]["motivo"],
+                 f["exclusion"].get("excluido_por") or "",
+                 str(f["exclusion"].get("excluido_en") or "")[:16]]
+                for f in ex],
+               anchos=[11, 36, 20, 14, 50, 22, 18], formatos={3: PESOS})
+
     # -------------------------------------------------- 7. hallazgos
     h = _hoja(wb, "Hallazgos", "Hallazgos",
               "Detectados durante la carga y validación. Los no explicados no se "

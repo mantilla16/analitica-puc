@@ -500,6 +500,38 @@ export default function Papel({ encargoId, fase }) {
           naturaleza invertida.
         </p>
 
+        {/* Exclusiones del auditor: se declaran siempre, con motivo, quién y
+            cuándo. Un papel que omite cuentas sin decirlo no se puede firmar. */}
+        {(d.excluidas ?? []).length > 0 && (
+          <div className="mt-4">
+            <p className="rotulo mb-1">Excluidas del análisis por decisión del auditor</p>
+            <table className="w-full text-xs">
+              <tbody>
+                {d.excluidas.map((f) => (
+                  <tr key={f.cuenta} className="border-b border-regla-fina">
+                    <td className="cifra w-16 py-1.5 pr-3">{f.cuenta}</td>
+                    <td className="py-1.5 pr-3">{f.nombre}</td>
+                    <td className="cifra whitespace-nowrap py-1.5 pr-3 text-right">{monto(f.variacion)}</td>
+                    <td className="py-1.5 text-tinta-media">
+                      {f.exclusion?.motivo}
+                      <span className="ml-1 text-tinta-suave">
+                        ({f.exclusion?.excluido_por ?? "—"}, {fecha(f.exclusion?.excluido_en)})
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {d.excluidas_superan_umbral && (
+              <p className="mt-2 text-xs text-ambar">
+                Lo excluido suma <span className="cifra">{monto(d.variacion_excluida)}</span> y
+                supera la materialidad de desempeño: la decisión debe quedar
+                soportada en el legajo.
+              </p>
+            )}
+          </div>
+        )}
+
         {d.residuo_supera_umbral && (
           <div className="mt-3">
             <Aviso tono="alerta" titulo="El alcance puede quedar corto">

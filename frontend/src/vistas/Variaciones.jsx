@@ -53,11 +53,37 @@ export default function Variaciones({ encargoId }) {
 
   useEffect(() => { api.fases().then(setFases).catch(() => {}); }, []);
 
+  // `rev` fuerza a recalcular el comparativo despues de excluir o restaurar
+  // una cuenta: la exclusion cambia la seleccion y el residuo en el servidor.
+  const [rev, setRev] = useState(0);
   useEffect(() => {
     api.variaciones(encargoId, fase)
       .then((r) => { setD(r); if (!fase && r.fase) setFase(r.fase); })
       .catch((e) => setError(e.message));
-  }, [encargoId, fase]);
+  }, [encargoId, fase, rev]);
+
+  // Excluir es juicio del auditor y queda en el papel: sin motivo no se hace.
+  async function excluir(prefijo, nombre) {
+    const motivo = window.prompt(
+      `Motivo para excluir ${prefijo}${nombre ? ` (${nombre})` : ""} del análisis.\n` +
+      "Queda en el papel de trabajo (mínimo 10 caracteres):");
+    if (motivo === null) return;
+    try {
+      setError(null);
+      await api.excluirCuenta(encargoId, prefijo, motivo);
+      setRev((n) => n + 1);
+    } catch (e) { setError(e.message); }
+  }
+
+  async function restaurar(prefijo) {
+    try {
+      setError(null);
+      await api.restaurarCuenta(encargoId, prefijo);
+      setRev((n) => n + 1);
+    } catch (e) { setError(e.message); }
+  }
+
+  const [prefijoNuevo, setPrefijoNuevo] = useState("");
 
   const [progreso, setProgreso] = useState(null);   // {hecho, total} mientras corren los lotes
   const [ajuste, setAjuste] = useState({});         // {codigo: texto que escribe el auditor}
@@ -490,6 +516,11 @@ export default function Variaciones({ encargoId }) {
                               className="rotulo text-tinta-suave hover:text-tinta">
                         Evidencia
                       </button>
+                      <button onClick={() => excluir(f.cuenta, f.nombre)}
+                              title="Sacar esta cuenta del análisis (pide motivo)"
+                              className="rotulo text-tinta-suave hover:text-rojo">
+                        Excluir
+                      </button>
                     </div>
                   </td>
                   {hayMov && <CeldaDeltaMov c={mov.por_cuenta?.[f.cuenta]} />}
@@ -585,10 +616,75 @@ export default function Variaciones({ encargoId }) {
           al esperado para la cuenta.
         </p>
         <p className="mt-1">
-          Las clases 1, 2 y 3 se comparan contra el cierre del año anterior; las
-          clases 4 a 7, contra el mismo corte del año pasado.
+          Las clases 1, 2 y 3 y las cuentas de orden (8 y 9) se comparan contra
+          el cierre del año anterior; las clases 4 a 7, contra el mismo corte
+          del año pasado.
         </p>
       </div>
+
+      {/* ------------------------------------- exclusiones del auditor */}
+      <section className="border-t border-regla pt-6">
+        <p className="rotulo mb-1">Excluidas del análisis</p>
+        <p className="mb-3 max-w-2xl text-xs text-tinta-suave">
+          Cuentas que el auditor decidió no analizar. Siguen cargadas en el
+          balance, pero no se seleccionan ni suman en lo no seleccionado. El
+          papel de trabajo las declara con su motivo.
+        </p>
+
+        {(d.exclusiones ?? []).length > 0 ? (
+          <div className="mb-4 border-t border-regla text-sm">
+            {d.exclusiones.map((e) => {
+              const cuentas = (d.excluidas ?? []).filter(
+                (f) => f.exclusion?.prefijo === e.prefijo);
+              return (
+                <div key={e.prefijo}
+                     className="flex flex-wrap items-baseline gap-3 border-b border-regla-fina py-2">
+                  <span className="cifra w-16 font-medium">{e.prefijo}</span>
+                  <span className="flex-1 text-xs text-tinta-media">
+                    {e.motivo}
+                    <span className="ml-2 text-tinta-suave">
+                      · {cuentas.length} cuenta(s) ·{" "}
+                      <span className="cifra">
+                        {monto(cuentas.reduce((s, f) => s + Math.abs(Number(f.variacion)), 0))}
+                      </span>{" "}
+                      en variación · {e.excluido_por ?? "—"} · {fecha(e.excluido_en)}
+                    </span>
+                  </span>
+                  <button onClick={() => restaurar(e.prefijo)}
+                          className="rotulo text-tinta-suave hover:text-verde">
+                    Restaurar
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="mb-4 text-xs text-tinta-suave">Ninguna cuenta excluida.</p>
+        )}
+
+        {d.excluidas_superan_umbral && (
+          <div className="mb-4">
+            <Aviso tono="alerta" titulo="Lo excluido supera la materialidad de desempeño">
+              Las variaciones de las cuentas excluidas suman{" "}
+              <span className="cifra">{monto(d.variacion_excluida)}</span>. La
+              decisión debe quedar soportada en el legajo.
+            </Aviso>
+          </div>
+        )}
+
+        {/* Para sacar una clase o grupo entero (p.ej. 9, cuentas de orden). */}
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <input value={prefijoNuevo}
+                 onChange={(e) => setPrefijoNuevo(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                 placeholder="Clase, grupo o cuenta (ej. 9, 24, 2408)"
+                 className="cifra w-72 border border-regla bg-papel px-3 py-2 text-sm" />
+          <button onClick={async () => { await excluir(prefijoNuevo); setPrefijoNuevo(""); }}
+                  disabled={!prefijoNuevo}
+                  className="rotulo border border-regla px-3 py-2 hover:bg-papel disabled:opacity-40">
+            Excluir
+          </button>
+        </div>
+      </section>
 
       {historial && (
         <Historial h={historial} onCerrar={() => setHistorial(null)} />

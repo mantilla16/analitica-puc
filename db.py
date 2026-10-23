@@ -405,6 +405,38 @@ def quitar_del_encargo(encargo_id: str, usuario_id: str) -> int:
         ).rowcount
 
 
+def cuentas_excluidas(encargo_id: str) -> list[dict]:
+    return varios(
+        """SELECT prefijo, motivo, excluido_por, excluido_en
+             FROM core.cuenta_excluida
+            WHERE encargo_id=%s ORDER BY prefijo""",
+        (encargo_id,),
+    )
+
+
+def excluir_cuenta(encargo_id: str, prefijo: str, motivo: str,
+                   usuario: str | None) -> dict:
+    """Upsert: volver a excluir el mismo prefijo actualiza el motivo."""
+    return uno(
+        """INSERT INTO core.cuenta_excluida
+             (encargo_id, prefijo, motivo, excluido_por)
+           VALUES (%s,%s,%s,%s)
+           ON CONFLICT (encargo_id, prefijo) DO UPDATE
+             SET motivo=EXCLUDED.motivo, excluido_por=EXCLUDED.excluido_por,
+                 excluido_en=now()
+           RETURNING prefijo, motivo, excluido_por, excluido_en""",
+        (encargo_id, prefijo, motivo, usuario),
+    )
+
+
+def restaurar_cuenta(encargo_id: str, prefijo: str) -> int:
+    with conn() as c:
+        return c.execute(
+            "DELETE FROM core.cuenta_excluida WHERE encargo_id=%s AND prefijo=%s",
+            (encargo_id, prefijo),
+        ).rowcount
+
+
 def dueno_de_encargo(encargo_id: str) -> str | None:
     """El id del usuario que creó el encargo, o None si no tiene dueño."""
     f = uno("SELECT creado_por FROM core.encargo WHERE id=%s", (encargo_id,))

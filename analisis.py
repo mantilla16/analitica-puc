@@ -267,6 +267,27 @@ def variaciones(encargo_id: str, fase: str | None = None) -> dict:
     # una cédula. Antes iba por variación descendente, que servía para
     # "lo más grande primero" pero desordenaba la lectura contable.
     filas.sort(key=lambda f: f["cuenta"])
+
+    # Exclusiones del auditor: la cuenta sale de `filas` (no se selecciona
+    # ni suma al residuo) y pasa a `excluidas`, con su motivo, para que el
+    # papel la declare. Se separa en lugar de marcarla porque todo lo que
+    # recorre `filas` (gates, cedula, excel, IA) debe ignorarla sin tener
+    # que saber que existe la exclusion.
+    exclusiones = db.cuentas_excluidas(encargo_id)
+    excluidas = []
+    if exclusiones:
+        quedan = []
+        for f in filas:
+            e = R.exclusion_de(f["cuenta"], exclusiones)
+            if e:
+                excluidas.append({**f, "significativa": False,
+                                  "motivo_original": f["motivo"], "motivo": None,
+                                  "exclusion": e})
+            else:
+                quedan.append(f)
+        filas = quedan
+    variacion_excluida = sum(abs(f["variacion"]) for f in excluidas)
+
     no_significativas = [f for f in filas if not f["significativa"]]
     residuo = sum(abs(f["variacion"]) for f in no_significativas)
 
@@ -294,6 +315,12 @@ def variaciones(encargo_id: str, fase: str | None = None) -> dict:
             _desglose_residuo(no_significativas, trivial) if aplica else None
         ),
         "filas": filas,
+        "exclusiones": exclusiones,
+        "excluidas": excluidas,
+        "variacion_excluida": variacion_excluida,
+        # Excluir no es gratis: si lo que se saco del analisis por si solo
+        # supera la materialidad de desempeño, el papel tiene que decirlo.
+        "excluidas_superan_umbral": bool(umbral and variacion_excluida > umbral),
     }
 
 

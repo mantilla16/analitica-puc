@@ -614,6 +614,9 @@ def _riesgo(gates: list[dict], previos: list[dict], d: dict) -> dict:
     if d.get("residuo_supera_umbral"):
         sumar(3, "Lo no seleccionado supera la materialidad de desempeño de la fase",
               "Control de alcance")
+    if d.get("excluidas_superan_umbral"):
+        sumar(2, "Las cuentas excluidas por el auditor superan la materialidad "
+                 "de desempeño", "Exclusiones del auditor")
     if not d.get("aplica"):
         sumar(4, "No hay materialidad aplicada: ninguna cuenta quedó seleccionada",
               "Parámetros del encargo")

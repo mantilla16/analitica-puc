@@ -240,6 +240,25 @@ def _que_deje_por_fuera(d: dict) -> list[str]:
                     "individualmente ni sumadas alcanzan a ser materiales.")]
 
 
+def _que_excluyo_el_auditor(d: dict) -> list[str]:
+    """Lo que el auditor saco del analisis por decision propia. Se dice
+    siempre, con cuantas, cuanto suman y por que: una omision no declarada
+    es exactamente lo que este papel no puede tener."""
+    ex = d.get("excluidas") or []
+    if not ex:
+        return []
+    motivos = "; ".join(
+        f"{e['prefijo']}: {e['motivo']}" for e in (d.get("exclusiones") or []))
+    texto = (f"Por decisión del auditor se excluyeron del análisis "
+             f"{_plural(len(ex), 'cuenta', 'cuentas')}, con "
+             f"variaciones absolutas por {A._cop(d.get('variacion_excluida'))}. "
+             f"Motivos: {motivos}.")
+    if d.get("excluidas_superan_umbral"):
+        texto += (" Lo excluido supera por sí solo la materialidad de desempeño "
+                  "de la fase: la decisión debe quedar soportada en el legajo.")
+    return [texto]
+
+
 def relato(enc: dict, contrato: list[dict], previos: list[dict],
            gates: list[dict], d: dict) -> list[str]:
     """El procedimiento completo, párrafo por párrafo."""
@@ -247,7 +266,8 @@ def relato(enc: dict, contrato: list[dict], previos: list[dict],
             + _como_defini_el_alcance(d)
             + [_que_controles(previos, gates)]
             + _tolerancias(gates)
-            + _que_deje_por_fuera(d))
+            + _que_deje_por_fuera(d)
+            + _que_excluyo_el_auditor(d))
 
 
 # =====================================================================

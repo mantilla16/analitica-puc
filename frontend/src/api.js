@@ -91,6 +91,10 @@ export const api = {
   variaciones: (id, fase) =>
     pedir(`/encargos/${id}/variaciones${fase ? `?fase=${fase}` : ""}`),
   iaConfig: () => pedir("/ia/config"),
+  excluirCuenta: (id, prefijo, motivo) =>
+    pedir(`/encargos/${id}/exclusiones`, json("POST", { prefijo, motivo })),
+  restaurarCuenta: (id, prefijo) =>
+    pedir(`/encargos/${id}/exclusiones/${prefijo}`, { method: "DELETE" }),
   papel: (id, fase) => pedir(`/encargos/${id}/papel/${fase}`),
   /* El Excel se descarga directo: no pasa por pedir(), que espera JSON.
      Se navega a la ruta y el navegador toma el nombre del archivo del

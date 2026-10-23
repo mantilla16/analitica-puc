@@ -91,6 +91,8 @@ ACCIONES = [
     ("POST",   r"^/cargas/[^/]+/promover$",           "BALANCE_PROMOVIDO",    "carga"),
     ("PUT",    r"^/encargos/[^/]+/materialidades/",   "MATERIALIDAD_GUARDADA","encargo"),
     ("PUT",    r"^/encargos/[^/]+/parametros$",       "PARAMETROS_GUARDADOS", "encargo"),
+    ("POST",   r"^/encargos/[^/]+/exclusiones$",      "CUENTA_EXCLUIDA",      "encargo"),
+    ("DELETE", r"^/encargos/[^/]+/exclusiones/",      "CUENTA_RESTAURADA",    "encargo"),
     ("PUT",    r"^/encargos/[^/]+/fase/",             "FASE_CAMBIADA",        "encargo"),
     ("POST",   r"/observaciones/lote$",               "OBSERVACIONES_IA",     "cuenta"),
     ("POST",   r"/observacion/[^/]+$",                "OBSERVACION_IA",       "cuenta"),
@@ -1165,6 +1167,37 @@ def variaciones(encargo_id: str, fase: str | None = None) -> dict:
     d = A.variaciones(encargo_id, fase)
     d["movimientos_comparados"] = A.movimientos_comparados(encargo_id)
     return d
+
+
+class Exclusion(BaseModel):
+    prefijo: str
+    motivo: str
+
+
+@app.get("/encargos/{encargo_id}/exclusiones")
+def ver_exclusiones(encargo_id: str) -> list[dict]:
+    return db.cuentas_excluidas(encargo_id)
+
+
+@app.post("/encargos/{encargo_id}/exclusiones")
+def excluir_cuenta(encargo_id: str, e: Exclusion, request: Request) -> dict:
+    """Saca una cuenta, grupo o clase del analisis de este encargo. Es
+    juicio del auditor, asi que exige motivo y queda en la bitacora; el
+    balance cargado no se toca."""
+    errores = R.validar_exclusion(e.prefijo, e.motivo)
+    if errores:
+        raise HTTPException(422, " ".join(errores))
+    prefijo, motivo = e.prefijo.strip(), e.motivo.strip()
+    request.state.bitacora = {"prefijo": prefijo, "motivo": motivo}
+    return db.excluir_cuenta(encargo_id, prefijo, motivo, _quien(request))
+
+
+@app.delete("/encargos/{encargo_id}/exclusiones/{prefijo}")
+def restaurar_cuenta(encargo_id: str, prefijo: str, request: Request) -> dict:
+    if not db.restaurar_cuenta(encargo_id, prefijo):
+        raise HTTPException(404, "Esa cuenta no estaba excluida")
+    request.state.bitacora = {"prefijo": prefijo}
+    return {"ok": True}
 
 
 @app.get("/encargos/{encargo_id}/cuentas/{codigo}")
