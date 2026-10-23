@@ -508,6 +508,10 @@ def promover_balance(carga_id: str) -> dict:
     filas, descartadas = [], 0
     fuera_por_digitos: dict[int, int] = {}
     fuera_por_codigo = 0
+    # Cuales, no solo cuantas: "se excluyo 1 fila" sin decir cual no se
+    # puede revisar, y si la fila era una cuenta con el codigo mal escrito
+    # su saldo se perdio sin que nadie lo vea.
+    sin_codigo: list[dict] = []
     # Se guardan, no solo se cuentan: con el codigo y el saldo se puede
     # COMPROBAR que lo excluido ya estaba en la cuenta padre, en vez de
     # anunciar una exclusion y dejar al auditor con la duda.
@@ -534,6 +538,7 @@ def promover_balance(carga_id: str) -> dict:
         if not cod or not cod.isdigit() or not ("1" <= cod[0] <= "7"):
             descartadas += 1
             fuera_por_codigo += 1
+            sin_codigo.append(s)
             continue
         niv = _nivel_de(len(cod))
         signo = R.resolver_signo(cod, exc, sclase)
@@ -652,12 +657,31 @@ def promover_balance(carga_id: str) -> dict:
                              ". El balance analizado no incluye ese saldo."),
             )
     if fuera_por_codigo:
+        def _fila(s: dict) -> str:
+            cod = (s.get("codigo_puc") or "").strip() or "vacío"
+            nom = (s.get("nombre_cuenta") or "").strip()
+            sf = (s.get("saldo_final") or "").strip()
+            return (f"hoja {s.get('hoja')!r}, fila {s.get('fila_origen')}: "
+                    f"código «{cod}»"
+                    + (f", «{nom}»" if nom else "")
+                    + (f", saldo {sf}" if sf and sf not in ("0", "0.00") else ""))
+        MAX_LISTA = 30
+        lista = "; ".join(_fila(s) for s in sin_codigo[:MAX_LISTA])
+        resto = (f" … y {len(sin_codigo) - MAX_LISTA} más"
+                 if len(sin_codigo) > MAX_LISTA else "")
+        # Si alguna traia saldo, puede ser una cuenta real mal codificada y
+        # no un titulo: se dice para que el auditor la mire primero.
+        con_saldo = sum(1 for s in sin_codigo
+                        if (s.get("saldo_final") or "").strip() not in ("", "0", "0.00"))
         db.crear_hallazgo(
             encargo_id=c["encargo_id"], carga_id=carga_id,
             tipo="CODIGO_NO_CONTABLE", severidad="INFORMATIVO",
-            descripcion=(f"Se excluyeron {fuera_por_codigo} filas cuyo codigo "
-                         f"esta vacio, no es numerico o no empieza por 1-7 "
-                         f"(titulos, subtotales, cortes de pagina)."),
+            descripcion=(f"Se excluyeron {fuera_por_codigo} fila(s) cuyo código "
+                         f"está vacío, no es numérico o no empieza por 1-7 "
+                         f"(títulos, subtotales, cortes de página): {lista}{resto}."
+                         + (f" {con_saldo} de ellas traían saldo: confirme que "
+                            f"son totales y no cuentas con el código mal escrito."
+                            if con_saldo else "")),
         )
 
     for d in duplicados[:TOPE]:
