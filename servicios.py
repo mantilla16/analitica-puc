@@ -535,7 +535,9 @@ def promover_balance(carga_id: str) -> dict:
 
     for s in crudo:
         cod = (s["codigo_puc"] or "").strip()
-        if not cod or not cod.isdigit() or not ("1" <= cod[0] <= "7"):
+        # Clases 1-9: las cuentas de orden (8, 9) tambien se cargan. Solo se
+        # excluye lo que no es un codigo contable (vacio, texto, empieza por 0).
+        if not R.es_clase_puc(cod):
             descartadas += 1
             fuera_por_codigo += 1
             sin_codigo.append(s)
@@ -677,7 +679,7 @@ def promover_balance(carga_id: str) -> dict:
             encargo_id=c["encargo_id"], carga_id=carga_id,
             tipo="CODIGO_NO_CONTABLE", severidad="INFORMATIVO",
             descripcion=(f"Se excluyeron {fuera_por_codigo} fila(s) cuyo código "
-                         f"está vacío, no es numérico o no empieza por 1-7 "
+                         f"está vacío, no es numérico o no empieza por 1-9 "
                          f"(títulos, subtotales, cortes de página): {lista}{resto}."
                          + (f" {con_saldo} de ellas traían saldo: confirme que "
                             f"son totales y no cuentas con el código mal escrito."

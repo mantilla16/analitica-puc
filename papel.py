@@ -90,6 +90,9 @@ def _cuadre_niveles(carga_id: str) -> list[dict]:
            FROM core.balance b
            JOIN core.nivel_cargable n ON n.nivel = b.nivel
            WHERE b.carga_id = %s
+             -- solo la ecuacion contable: las cuentas de orden (8, 9) no
+             -- suman cero con el balance (reglas.CLASES_ECUACION)
+             AND b.clase BETWEEN '1' AND '7'
            GROUP BY b.nivel, n.nivel_completo, n.orden
            ORDER BY n.orden""",
         (carga_id,),

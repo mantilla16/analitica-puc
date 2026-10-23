@@ -210,8 +210,8 @@ def variaciones(encargo_id: str, fase: str | None = None) -> dict:
     for cod in sorted(set(act) | set(cie) | set(cor)):
         clase = cod[0]
         base = act.get(cod) or cie.get(cod) or cor.get(cod)
-        comparativo = cie if clase <= "3" else cor
-        regla = "Cierre anterior" if clase <= "3" else "Mismo corte del año anterior"
+        comparativo = cie if R.compara_contra_cierre(clase) else cor
+        regla = "Cierre anterior" if R.compara_contra_cierre(clase) else "Mismo corte del año anterior"
 
         if cod not in act and cod not in comparativo:
             continue
@@ -636,7 +636,7 @@ def _entrada_para(d: dict, encargo_id: str, fila: dict,
     """`mc` es movimientos_comparados ya calculado. En lote se calcula una
     vez y se reparte; si no llega, se calcula aqui (una cuenta suelta)."""
     act_id = carga_de(encargo_id, "BAL_ACTUAL")
-    comparativo_id = (carga_de(encargo_id, "BAL_CIERRE_ANTERIOR") if fila["clase"] <= "3"
+    comparativo_id = (carga_de(encargo_id, "BAL_CIERRE_ANTERIOR") if R.compara_contra_cierre(fila["clase"])
                       else carga_de(encargo_id, "BAL_CORTE_ANTERIOR"))
     mov_id = carga_de(encargo_id, "MOV_ACTUAL")
     patrones = _patrones_cuenta(mov_id, fila["cuenta"])
@@ -695,7 +695,7 @@ def evidencia_cuenta(encargo_id: str, fase: str, codigo: str) -> dict:
         return {"listo": False, "faltan": []}
 
     act_id = carga_de(encargo_id, "BAL_ACTUAL")
-    comparativo_id = (carga_de(encargo_id, "BAL_CIERRE_ANTERIOR") if fila["clase"] <= "3"
+    comparativo_id = (carga_de(encargo_id, "BAL_CIERRE_ANTERIOR") if R.compara_contra_cierre(fila["clase"])
                       else carga_de(encargo_id, "BAL_CORTE_ANTERIOR"))
     mov_id = carga_de(encargo_id, "MOV_ACTUAL")
 
@@ -787,7 +787,7 @@ def _cuadre_movimientos(fila: dict, totales: dict | None, signo: int) -> dict | 
         return None
 
     neto = (Decimal(totales["debito"]) - Decimal(totales["credito"])) * signo
-    if fila["clase"] <= "3":
+    if R.compara_contra_cierre(fila["clase"]):
         contra, esperado = "la variación", Decimal(fila["variacion"])
     else:
         contra, esperado = "el saldo actual", Decimal(fila["saldo_actual"])

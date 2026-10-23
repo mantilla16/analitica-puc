@@ -15,6 +15,30 @@ from typing import Any, Iterable
 
 PCT_VARIACION_DEFECTO = Decimal("20.00")
 
+# -------------------------------------------------------------------- clases
+#
+# El PUC tiene nueve clases. Las 1-7 forman la ecuacion contable (activo =
+# pasivo + patrimonio + resultado) y son las unicas que deben sumar cero.
+# Las 8 y 9 son cuentas de orden: se cargan, se muestran y se comparan, pero
+# NO entran al cuadre -- se compensan entre si con su "por contra", y no
+# todos los clientes las llevan completas.
+#
+# Contra que se comparan: las de saldo (balance y orden) contra el cierre
+# del año anterior; las de resultado (4-7) contra el mismo corte del año
+# anterior. Refleja core.puc_clase.comparativo.
+CLASES_PUC = "123456789"
+CLASES_ECUACION = "1234567"
+CLASES_CONTRA_CIERRE = "12389"
+
+
+def es_clase_puc(codigo: str) -> bool:
+    return bool(codigo) and codigo.isdigit() and codigo[0] in CLASES_PUC
+
+
+def compara_contra_cierre(clase: str) -> bool:
+    """True si la cuenta se compara contra el cierre del año anterior."""
+    return (clase or "")[:1] in CLASES_CONTRA_CIERRE
+
 # Cada fase tiene TRES cifras: la global (la digita el auditor), la de
 # desempeno (la que define el alcance: contra ella se marca "Monto") y el
 # error trivial (por debajo, una diferencia no se mira). Antes la global se
@@ -444,13 +468,16 @@ def convencion_signo(filas, signo_clase: dict[str, int]
     # -- se usan las hojas mas finas: cubren cada peso una sola vez, igual
     # que las clases, y la suma por primer digito del codigo es equivalente
     # a sumar por clase.
+    # Solo clases de la ecuacion (1-7): las cuentas de orden no suman cero
+    # con el balance y meterlas aqui haria fallar las dos hipotesis.
     codigos = [(f.get("codigo_puc") or "").strip() for f in filas]
-    tiene_clases = any(len(c) == 1 and c.isdigit() for c in codigos)
+    en_ecuacion = lambda c: c.isdigit() and c[:1] in CLASES_ECUACION
+    tiene_clases = any(len(c) == 1 and en_ecuacion(c) for c in codigos)
     if tiene_clases:
-        acepta = lambda c: len(c) == 1 and c.isdigit()
+        acepta = lambda c: len(c) == 1 and en_ecuacion(c)
     else:
-        max_dig = max((len(c) for c in codigos if c.isdigit()), default=0)
-        acepta = lambda c: len(c) == max_dig and c.isdigit()
+        max_dig = max((len(c) for c in codigos if en_ecuacion(c)), default=0)
+        acepta = lambda c: len(c) == max_dig and en_ecuacion(c)
 
     crudo = Decimal(0)
     con_signo = Decimal(0)
@@ -873,9 +900,14 @@ def cuadre_por_nivel(filas: list[dict], niveles: dict[str, dict]) -> list[dict]:
     """Cada nivel completo debe sumar cero. Es la ecuación contable.
 
     Auxiliar no cuadra solo: hay subcuentas que no bajan a 8 dígitos.
+
+    Solo cuentan las clases 1-7: las cuentas de orden (8, 9) se cargan pero
+    no forman parte de la ecuación.
     """
     agr: dict[str, dict] = {}
     for f in filas:
+        if (f.get("clase") or f.get("codigo_puc", "")[:1]) not in CLASES_ECUACION:
+            continue
         n = f["nivel"]
         a = agr.setdefault(n, {"nivel": n, "filas": 0,
                                "suma_saldo_final": Decimal(0),
